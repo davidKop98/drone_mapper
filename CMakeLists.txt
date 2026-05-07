@@ -10,6 +10,7 @@ set(CMAKE_BUILD_TYPE Debug)
 find_package(mp-units CONFIG REQUIRED)
 add_executable(drone_mapper
     src/main.cpp
+    src/MockLidarSensor.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE
@@ -18,3 +19,5 @@ target_link_libraries(drone_mapper PRIVATE
     mp-units::mp-units
     mp-units::mp-units-contracts
 )
+
+target_include_directories(drone_mapper PRIVATE include)
