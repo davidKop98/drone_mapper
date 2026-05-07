@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug drone_mapper",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/workspaces/drone_mapper/build/drone_mapper",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "/workspaces/drone_mapper",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "build"
+    }
+  ]
+}
