@@ -11,6 +11,12 @@ namespace cpp_course {
 // Test/demonstration LiDAR that ray marches through an IMap3D from the current
 // IPositionSensor pose.
 class MockLidarSensor final : public ILidarSensor {
+private:
+    [[nodiscard]] std::optional<PhysicalLength> traceBeam(const Orientation& beam) const; // returns distance
+
+    LidarConfig config_;
+    const IMap3D& map_;
+    const IPositionSensor& pos_sensor_;
 public:
     MockLidarSensor(LidarConfig config, const IMap3D& map, const IPositionSensor& pos_sensor);
 
@@ -23,12 +29,6 @@ public:
 
     [[nodiscard]] const LidarConfig& config() const noexcept;
 
-private:
-    [[nodiscard]] std::optional<PhysicalLength> traceBeam(const Orientation& beam) const; // returns distance
-
-    LidarConfig config_;
-    const IMap3D& map_;
-    const IPositionSensor& pos_sensor_;
 };
 
 } // namespace cpp_course

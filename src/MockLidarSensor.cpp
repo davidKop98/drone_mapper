@@ -1,7 +1,7 @@
 #include <cpp_course/MockLidarSensor.h>
 
 #include <mp-units/systems/si/math.h>
-
+#include <cmath>
 #include <algorithm>
 #include <optional>
 
@@ -10,11 +10,7 @@ namespace cpp_course {
 namespace {
 
 [[nodiscard]] std::size_t beams_on_circle(std::size_t circle_index) {
-    std::size_t count = 1;
-    for (std::size_t i = 0; i < circle_index; ++i) {
-        count *= 4;
-    }
-    return count;
+    return std::pow(4, circle_index);
 }
 
 [[nodiscard]] HorizontalAngle horizontal_delta(PhysicalLength offset, PhysicalLength distance) {
@@ -27,6 +23,13 @@ namespace {
 
 } // namespace
 
+//for myself: mocklidar: lidar_config, real_map, position_sensor
+// scan(relative_angle): 1)calc 3d gradient using relativeAngle+currentAngle from pos sensor
+//                       2)calc the trajectory of the 3D vector based on grad+starting point
+//                       3)based on small relative steps check if there is colision with map, and update result
+//                       4)repeat, but now for all beams at different circles->each has different relative angle                   
+
+
 MockLidarSensor::MockLidarSensor(LidarConfig config,
                                  const IMap3D& map,
                                  const IPositionSensor& pos_sensor)
@@ -34,11 +37,11 @@ MockLidarSensor::MockLidarSensor(LidarConfig config,
 
 ScanResults MockLidarSensor::scan(Orientation rel_scan_orientation) const {
     ScanResults results;
-    if (config_.fov_circles == 0) {
+    if (config_.fov_circles == 0) { //no circles
         return results;
     }
 
-    const Orientation sensor_heading = pos_sensor_.heading();
+    const Orientation sensor_heading = pos_sensor_.heading(); //current pov of drone
     // beam_0 directed at the orientation of the scan!
     const Orientation& beam_0 = rel_scan_orientation; // "alias" for rel_scan_orientation!
 
@@ -54,7 +57,7 @@ ScanResults MockLidarSensor::scan(Orientation rel_scan_orientation) const {
     }
     for (std::size_t circle = 1; circle < config_.fov_circles; ++circle) {
         const std::size_t beam_count = beams_on_circle(circle);
-        const PhysicalLength radius = static_cast<double>(circle) * config_.circle_spacing / 2.0;
+        const PhysicalLength radius = static_cast<double>(circle) * config_.circle_spacing; //circle_spacing = D
 
         for (std::size_t i = 0; i < beam_count; ++i) {
             const auto theta = (360.0 * static_cast<double>(i) / static_cast<double>(beam_count)) * deg; // generates the beam's angle from beam 0
@@ -67,12 +70,12 @@ ScanResults MockLidarSensor::scan(Orientation rel_scan_orientation) const {
             };
 
             // Mock knows the abs circle beam, but regular does not! So we return without the sensorheading offset
-            const Orientation abs_circle_beam{
+            const Orientation abs_circle_beam{ //abs = absolute
                 beam_0.horizontal + offset.horizontal + sensor_heading.horizontal,
                 beam_0.altitude + offset.altitude + sensor_heading.altitude,
             };
             // Inefficient - can you think of a better way?
-             const Orientation circle_beam{
+             const Orientation circle_beam{ //relative angle
                 beam_0.horizontal + offset.horizontal,
                 beam_0.altitude + offset.altitude,
             };
@@ -104,7 +107,8 @@ std::optional<PhysicalLength> MockLidarSensor::traceBeam(const Orientation& beam
 
     // March along the ray from the configured near distance to the far distance,
     // sampling one point every centimeter.
-    const PhysicalLength step = PhysicalLength{0.1 * cm};
+    const PhysicalLength step = PhysicalLength{0.1 * cm}; //self note: might need to make step smaller for better accuracy
+    
     const PhysicalLength min_distance = std::min(config_.beam_length_min, step);
 
     for (PhysicalLength distance = min_distance; distance <= config_.beam_length_max; distance += step) {
