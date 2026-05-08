@@ -11,6 +11,7 @@ find_package(mp-units CONFIG REQUIRED)
 add_executable(drone_mapper
     src/main.cpp
     src/MockLidarSensor.cpp
+    src/config_parser.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE
