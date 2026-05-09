@@ -10,7 +10,7 @@ namespace cpp_course {
 
 namespace {
 
-using KVMap = std::unordered_map<std::string, std::string>;
+using KVMap = std::unordered_map<std::string, std::string>; //key-value map
 
 // Trim leading and trailing whitespace from a string.
 std::string trim(const std::string& s) {
@@ -44,18 +44,20 @@ bool readKVFile(const std::string& path, KVMap& out) {
 }
 
 // Extract a double from the map. Uses defaultVal if the key is absent or unparseable.
+// If can_be_negative is false, a parsed negative value is also treated as invalid.
 // Appends to errors on fallback.
 double getDouble(const KVMap& kv, const std::string& key, double defaultVal,
-                 std::vector<std::string>& errors) {
-    auto it = kv.find(key);
+                 std::vector<std::string>& errors, bool can_be_negative = true) {
+    auto it = kv.find(key); //find <key,value>
     if (it == kv.end()) {
         errors.push_back("Missing key '" + key + "'; using default " + std::to_string(defaultVal));
         return defaultVal;
     }
     try {
         std::size_t pos{};
-        double val = std::stod(it->second, &pos);
+        double val = std::stod(it->second, &pos); //string to double
         if (pos != it->second.size()) throw std::invalid_argument("trailing chars");
+        if (!can_be_negative && val < 0.0) throw std::invalid_argument("negative");
         return val;
     } catch (...) {
         errors.push_back("Invalid value for '" + key + "': \"" + it->second +
@@ -117,17 +119,17 @@ bool parseDroneConfig(const std::string& filePath,
     KVMap kv;
     if (!readKVFile(filePath, kv)) return false;
 
-    out.minPassWidth  = getDouble(kv, "min_pass_width",  20.0, errors) * cm;
-    out.minPassLength = getDouble(kv, "min_pass_length", 20.0, errors) * cm;
-    out.minPassHeight = getDouble(kv, "min_pass_height", 20.0, errors) * cm;
+    out.minPassWidth  = getDouble(kv, "min_pass_width",  20.0, errors, false) * cm;
+    out.minPassLength = getDouble(kv, "min_pass_length", 20.0, errors, false) * cm;
+    out.minPassHeight = getDouble(kv, "min_pass_height", 20.0, errors, false) * cm;
 
-    out.maxRotate  = getDouble(kv, "max_rotate",  180.0, errors) * deg;
+    out.maxRotate  = getDouble(kv, "max_rotate",  180.0, errors, false) * deg;
     out.maxAdvance = getDouble(kv, "max_advance", 100.0, errors) * cm;
     out.maxElevate = getDouble(kv, "max_elevate", 100.0, errors) * cm;
 
-    out.lidar.beam_length_min = getDouble(kv, "lidar_beam_min",   20.0, errors) * cm;
-    out.lidar.beam_length_max = getDouble(kv, "lidar_beam_max",  120.0, errors) * cm;
-    out.lidar.circle_spacing  = getDouble(kv, "lidar_spacing",     2.5, errors) * cm;
+    out.lidar.beam_length_min = getDouble(kv, "lidar_beam_min",   20.0, errors, false) * cm;
+    out.lidar.beam_length_max = getDouble(kv, "lidar_beam_max",  120.0, errors, false) * cm;
+    out.lidar.circle_spacing  = getDouble(kv, "lidar_spacing",     2.5, errors, false) * cm;
     out.lidar.fov_circles     = getSizeT (kv, "lidar_fov_circles",   3, errors);
 
     return true;
