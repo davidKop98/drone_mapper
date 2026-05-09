@@ -13,6 +13,7 @@ add_executable(drone_mapper
     src/MockLidarSensor.cpp
     src/config_parser.cpp
     src/DroneMath.cpp
+    src/BuildingMap.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE
