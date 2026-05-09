@@ -14,6 +14,7 @@ add_executable(drone_mapper
     src/config_parser.cpp
     src/DroneMath.cpp
     src/BuildingMap.cpp
+    src/InputMap.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE

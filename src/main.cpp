@@ -1,87 +1,80 @@
-#include <iomanip>
 #include <iostream>
 #include <string>
 
-#include <cpp_course/DroneMath.h>
+#include <cpp_course/BuildingMap.h>
+#include <cpp_course/InputMap.h>
 #include <cpp_course/config_parser.h>
 #include <cpp_course/configs.h>
+
+static const char* cellValueName(cpp_course::CellValue v) {
+    switch (v) {
+        case cpp_course::CellValue::Empty:       return "Empty";
+        case cpp_course::CellValue::Occupied:    return "Occupied";
+        case cpp_course::CellValue::Unmapped:    return "Unmapped";
+        case cpp_course::CellValue::OutOfBounds: return "OutOfBounds";
+    }
+    return "?";
+}
 
 int main(int argc, char* argv[]) {
     const std::string path = (argc > 1) ? argv[1] : ".";
     const std::string sep  = (path.back() == '/') ? "" : "/";
 
     std::vector<std::string> errors;
-
-    // --- Load configs (Layer 2) ---
     cpp_course::DroneConfig drone{};
-    if (!cpp_course::parseDroneConfig(path + sep + "drone_config.txt", drone, errors)) {
-        std::cout << "Fatal: cannot open drone_config.txt\n";
-        return 1;
-    }
     cpp_course::MissionConfig mission{};
-    if (!cpp_course::parseMissionConfig(path + sep + "mission_config.txt", mission, errors)) {
-        std::cout << "Fatal: cannot open mission_config.txt\n";
+
+    if (!cpp_course::parseDroneConfig(path + sep + "drone_config.txt", drone, errors) ||
+        !cpp_course::parseMissionConfig(path + sep + "mission_config.txt", mission, errors)) {
+        std::cout << "Fatal: cannot open config files\n";
         return 1;
     }
 
-    if (!errors.empty()) {
-        std::cout << "Input errors (recovered with defaults):\n";
-        for (const auto& e : errors) std::cout << "  " << e << "\n";
-    }
-
     // -----------------------------------------------------------------------
-    // Layer 3 tests
+    // Layer 5: InputMap test
     // -----------------------------------------------------------------------
-
-    namespace DM = cpp_course::DroneMath;
     using namespace cpp_course;
 
-    const LidarConfig lidar{
-        .beam_length_min = 20.0 * cm,
-        .beam_length_max = 120.0 * cm,
-        .circle_spacing  = 2.5 * cm,
-        .fov_circles     = 3,
-    };
-
-    // --- computeBeamDirections: orientation {0 deg, 0 deg} ---
-    std::cout << "\n=== computeBeamDirections (h=0, alt=0, fov_circles=3) ===\n";
-    const Orientation scanDir{0.0 * horizontal_angle[deg], 0.0 * altitude_angle[deg]};
-    const auto beams = DM::computeBeamDirections(scanDir, lidar);
-    std::cout << "  Total beams: " << beams.size() << "  (expected 21)\n";
-    std::cout << std::fixed << std::setprecision(3);
-    for (std::size_t i = 0; i < beams.size(); ++i) {
-        std::cout << "  [" << i << "] h=" << beams[i].horizontal
-                  << "  alt=" << beams[i].altitude << "\n";
+    // 1. Load map_input.txt
+    InputMap imap;
+    if (!imap.loadFromFile(path + sep + "map_input.txt")) {
+        std::cout << "Fatal: cannot load map_input.txt\n";
+        return 1;
     }
 
-    // --- snapValue ---
-    std::cout << "\n=== snapValue ===\n";
-    std::cout << "  snapValue(2.891, 1) = " << DM::snapValue(2.891f, 1) << "  (expected 2.8)\n";
-    std::cout << "  snapValue(-1.35, 1) = " << DM::snapValue(-1.35f, 1) << "  (expected -1.3)\n";
-    std::cout << "  snapValue(5.0,   0) = " << DM::snapValue(5.0f,   0) << "  (expected 5.0)\n";
-    std::cout << "  snapValue(-5.9,  0) = " << DM::snapValue(-5.9f,  0) << "  (expected -5.0)\n";
+    std::cout << "=== InputMap Layer 5 test ===\n";
+    std::cout << "Map: 5x5x3, resolution=0 (cell=1cm), floor/ceiling solid, walls on z=1\n\n";
 
-    // --- snapToGrid ---
-    std::cout << "\n=== snapToGrid (xyRes=1, zRes=0) ===\n";
-    const auto k1 = DM::snapToGrid(
-        Position3D{1.37 * x_extent[cm], 2.891 * y_extent[cm], 5.6 * z_extent[cm]}, 1, 0);
-    std::cout << "  (1.37, 2.891, 5.6) -> (" << k1.x << ", " << k1.y << ", " << k1.z
-              << ")  (expected 1.3, 2.8, 5.0)\n";
+    // Helper lambda for cleaner output
+    const auto query = [&](double x, double y, double z, int expected, const char* label) {
+        const Position3D pos{x * x_extent[cm], y * y_extent[cm], z * z_extent[cm]};
+        const int got = imap.get(pos);
+        std::cout << "  " << label
+                  << " get(" << x << "," << y << "," << z << ") = " << got
+                  << (got == expected ? "  OK" : "  FAIL")
+                  << "  (expected " << expected << ")\n";
+    };
 
-    const auto k2 = DM::snapToGrid(
-        Position3D{-1.35 * x_extent[cm], -2.01 * y_extent[cm], -0.9 * z_extent[cm]}, 1, 0);
-    std::cout << "  (-1.35, -2.01, -0.9) -> (" << k2.x << ", " << k2.y << ", " << k2.z
-              << ")  (expected -1.3, -2.0, 0.0)\n";
+    // 2. Occupied positions (walls / floor / ceiling)
+    query(0.0, 0.0, 0.0, 1, "floor  corner      "); // z=0 layer, row=0, col=0 → 1
+    query(4.0, 4.0, 0.0, 1, "floor  far corner  "); // z=0 layer, row=4, col=4 → 1
+    query(0.0, 0.0, 1.0, 1, "wall   top-left    "); // z=1 layer, row=0, col=0 → 1
+    query(4.0, 0.0, 1.0, 1, "wall   top-right   "); // z=1 layer, row=0, col=4 → 1
+    query(0.0, 0.0, 2.0, 1, "ceil   corner      "); // z=2 layer, row=0, col=0 → 1
 
-    // --- computeStepAngle ---
-    const auto step = DM::computeStepAngle(lidar);
-    std::cout << "\n=== computeStepAngle ===\n";
-    std::cout << "  step = " << step << "\n";
+    // 3. Empty positions (interior at z=1)
+    query(1.0, 1.0, 1.0, 0, "interior (1,1,1)   "); // z=1, row=1, col=1 → 0
+    query(2.0, 2.0, 1.0, 0, "interior (2,2,1)   "); // z=1, row=2, col=2 → 0
+    query(3.0, 3.0, 1.0, 0, "interior (3,3,1)   "); // z=1, row=3, col=3 → 0
 
-    // --- computeMoveStep ---
-    const auto move = DM::computeMoveStep(drone, mission);
-    std::cout << "\n=== computeMoveStep ===\n";
-    std::cout << "  move step = " << move << "\n";
+    // 4. Out-of-bounds queries must return 0
+    query(5.0, 0.0, 0.0, 0, "oob    x=5          "); // cx=5 >= sizeX=5
+    query(0.0, 5.0, 0.0, 0, "oob    y=5          "); // cy=5 >= sizeY=5
+    query(0.0, 0.0, 3.0, 0, "oob    z=3          "); // cz=3 >= sizeZ=3
+    query(-1.0, 0.0, 0.0, 0, "oob   x=-1          "); // negative x
+
+    // 5. Sub-cell query: position 0.7 still falls in cell 0 (floor(0.7/1)=0)
+    query(0.7, 0.7, 1.0, 1, "sub-cell wall (0.7)"); // floor → col=0, row=0 → wall
 
     return 0;
 }
