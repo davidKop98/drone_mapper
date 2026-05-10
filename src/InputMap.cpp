@@ -90,7 +90,7 @@ bool InputMap::loadFromFile(const std::string& path) {
     return true;
 }
 
-//given a position, and reference to 3 ints, return the grid coordinates of that position
+//given a world x,y,z position, and reference to 3 ints, return the grid coordinates of that position
 //in the 3 ints, and return true if the position is within the grid, false otherwise.
 bool InputMap::worldToGrid(const Position3D& pos,
                             int& cx, int& cy, int& cz) const {

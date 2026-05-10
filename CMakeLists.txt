@@ -15,6 +15,7 @@ add_executable(drone_mapper
     src/DroneMath.cpp
     src/BuildingMap.cpp
     src/InputMap.cpp
+    src/MockMovementDriver.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE

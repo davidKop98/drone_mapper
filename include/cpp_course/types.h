@@ -39,6 +39,7 @@ enum class CellValue : int {
 
 // Shared mutable state written by MockMovementDriver,
 // read by MockPositionSensor and MockLidarSensor.
+//note, drone state doesnt contain altitude angle, so if future might need to add it if required.
 struct DroneState {
     Position3D      position{};  // current drone center in world space
     HorizontalAngle heading{};   // current XY heading (0=east, 90=south)

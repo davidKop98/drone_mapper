@@ -19,6 +19,9 @@ public:
     // Returns 0 for empty or out-of-bounds, 1 for occupied.
     [[nodiscard]] int get(const Position3D& pos) const override;
 
+    // Cell size = 10^(-resolution) cm.
+    [[nodiscard]] int resolution() const { return resolution_; }
+
 private:
     // 3D grid indexed [layer z][row y][column x], values 0 or 1.
     std::vector<std::vector<std::vector<int>>> grid_;
