@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cpp_course/configs.h>
+#include <cpp_course/IMap3D.h>
 #include <cpp_course/LidarSensor.h>
 #include <cpp_course/types.h>
 #include <vector>
@@ -53,5 +54,58 @@ namespace cpp_course::DroneMath {
 [[nodiscard]] PhysicalLength computeMoveStep(
     const DroneConfig&   droneConfig,
     const MissionConfig& missionConfig);
+
+// ---------------------------------------------------------------------------
+// Collision-checking helpers — used by MockMovementDriver and the exploration
+// algorithm. The map is passed by interface (any IMap3D implementation works);
+// mapResolution is the cell size as decimal places (cell_size = 10^-resolution).
+
+// Check one vertical rectangular slice perpendicular to heading.
+// halfWidth = half drone width (perpendicular to heading in XY).
+// halfHeight = half drone height (Z axis).
+[[nodiscard]] bool checkAdvanceSlice(
+    const Position3D& center,
+    double halfWidth,
+    double halfHeight,
+    double headingRad,
+    const IMap3D& map,
+    int mapResolution);
+
+// Check one horizontal rectangular slice parallel to the ground.
+// halfWidth  = half drone width (perpendicular to heading).
+// halfLength = half drone length (along heading).
+[[nodiscard]] bool checkElevateSlice(
+    const Position3D& center,
+    double halfWidth,
+    double halfLength,
+    double headingRad,
+    const IMap3D& map,
+    int mapResolution);
+
+// True if the drone can safely advance from start by distanceCm along headingRad.
+// Sweeps advance slices from t=-halfLength (rear face at start) to
+// t=distanceCm+halfLength (front face at end).
+[[nodiscard]] bool canAdvance(
+    const Position3D& start,
+    double distanceCm,
+    double headingRad,
+    double halfWidth,
+    double halfLength,
+    double halfHeight,
+    const IMap3D& map,
+    int mapResolution);
+
+// True if the drone can safely elevate from start by distanceCm (negative=down).
+// Sweeps elevate slices vertically from t=-halfHeight (bottom face at start)
+// to t=|distanceCm|+halfHeight (top face at end).
+[[nodiscard]] bool canElevate(
+    const Position3D& start,
+    double distanceCm,
+    double headingRad,
+    double halfWidth,
+    double halfLength,
+    double halfHeight,
+    const IMap3D& map,
+    int mapResolution);
 
 } // namespace cpp_course::DroneMath

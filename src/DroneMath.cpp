@@ -51,7 +51,7 @@ Position3D beamToWorldPoint(const Position3D& dronePos,
 }
 
 // ---------------------------------------------------------------------------
-//helper function to find the appropriate pixel in output map
+//given a coordinate, return the "pixel" in the 3D map with resolution decimalPlace it fits in
 float snapValue(float value, int decimalPlaces) {
     const float factor = std::pow(10.0f, static_cast<float>(decimalPlaces));
     return std::floor(value * factor) / factor;
@@ -179,7 +179,7 @@ std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientatio
 // calculates step size for scan step we intend to do in a 360 spherical around the current position
 // the smaller the factor the most steps we gonna do = better coverage but less efficient.
 HorizontalAngle computeStepAngle(const LidarConfig& cfg) {
-    double factor = 0.5; //may need to adjust this. Large FOV = need smaller factor
+    double factor = 0.5; //may need to adjust this. Large FOV -> need smaller factor
     const double spacing  = cfg.circle_spacing.force_numerical_value_in(cm); //D
     const double beam_min = cfg.beam_length_min.force_numerical_value_in(cm); //Zmin
     const double step_deg = factor * fromRad(atan(spacing / beam_min));
@@ -197,6 +197,143 @@ PhysicalLength computeMoveStep(const DroneConfig&   droneConfig,
     double z_cell  = std::pow(10.0, -static_cast<double>(missionConfig.zResolution));
     double step    = std::min(xy_cell, z_cell);
     return step * cm;
+}
+
+// ---------------------------------------------------------------------------
+// Collision-checking helpers (moved from MockMovementDriver; logic unchanged).
+bool checkAdvanceSlice(const Position3D& center,
+                       double halfWidth,
+                       double halfHeight,
+                       double headingRad,
+                       const IMap3D& map,
+                       int mapResolution) {
+    const double cellSize = std::pow(10.0, -mapResolution);
+
+    // vec2: horizontal unit vector perpendicular to heading.
+    const double vec2X = -std::sin(headingRad);
+    const double vec2Y =  std::cos(headingRad);
+
+    const double stepI = (halfHeight > 0) ? cellSize / halfHeight : 1.0;
+    const double stepJ = (halfWidth  > 0) ? cellSize / halfWidth  : 1.0;
+
+    const double cx = center.x.force_numerical_value_in(cm);
+    const double cy = center.y.force_numerical_value_in(cm);
+    const double cz = center.z.force_numerical_value_in(cm);
+
+    for (double i = -1.0; i <= 1.0 + stepI * 0.5; i += stepI) {
+        const double fi = std::min(i, 1.0);
+        for (double j = -1.0; j <= 1.0 + stepJ * 0.5; j += stepJ) {
+            const double fj = std::min(j, 1.0);
+            const Position3D sample{
+                (cx + fj * halfWidth  * vec2X) * x_extent[cm],
+                (cy + fj * halfWidth  * vec2Y) * y_extent[cm],
+                (cz + fi * halfHeight)         * z_extent[cm],
+            };
+            if (map.get(sample) != 0) return true;
+        }
+    }
+    return false;
+}
+
+bool checkElevateSlice(const Position3D& center,
+                       double halfWidth,
+                       double halfLength,
+                       double headingRad,
+                       const IMap3D& map,
+                       int mapResolution) {
+    const double cellSize = std::pow(10.0, -mapResolution);
+
+    const double vec1X =  std::cos(headingRad);
+    const double vec1Y =  std::sin(headingRad);
+    const double vec2X = -std::sin(headingRad);
+    const double vec2Y =  std::cos(headingRad);
+
+    const double stepI = (halfLength > 0) ? cellSize / halfLength : 1.0;
+    const double stepJ = (halfWidth  > 0) ? cellSize / halfWidth  : 1.0;
+
+    const double cx = center.x.force_numerical_value_in(cm);
+    const double cy = center.y.force_numerical_value_in(cm);
+    const double cz = center.z.force_numerical_value_in(cm);
+
+    for (double i = -1.0; i <= 1.0 + stepI * 0.5; i += stepI) {
+        const double fi = std::min(i, 1.0);
+        for (double j = -1.0; j <= 1.0 + stepJ * 0.5; j += stepJ) {
+            const double fj = std::min(j, 1.0);
+            const Position3D sample{
+                (cx + fi * halfLength * vec1X + fj * halfWidth * vec2X) * x_extent[cm],
+                (cy + fi * halfLength * vec1Y + fj * halfWidth * vec2Y) * y_extent[cm],
+                cz * z_extent[cm],
+            };
+            if (map.get(sample) != 0) return true;
+        }
+    }
+    return false;
+}
+
+bool canAdvance(const Position3D& start,
+                double distanceCm,
+                double headingRad,
+                double halfWidth,
+                double halfLength,
+                double halfHeight,
+                const IMap3D& map,
+                int mapResolution) {
+    const double fx = std::cos(headingRad);
+    const double fy = std::sin(headingRad);
+
+    const double step_factor = 0.5;
+    const double step = step_factor * std::pow(10.0, -mapResolution);
+
+    const double startX = start.x.force_numerical_value_in(cm);
+    const double startY = start.y.force_numerical_value_in(cm);
+    const double startZ = start.z.force_numerical_value_in(cm);
+
+    for (double t = -halfLength; t <= distanceCm + halfLength + step * 0.5; t += step) {
+        const double tt = std::min(t, distanceCm + halfLength);
+        const Position3D sliceCenter{
+            (startX + fx * tt) * x_extent[cm],
+            (startY + fy * tt) * y_extent[cm],
+            startZ             * z_extent[cm],
+        };
+        if (checkAdvanceSlice(sliceCenter, halfWidth, halfHeight, headingRad,
+                              map, mapResolution)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool canElevate(const Position3D& start,
+                double distanceCm,
+                double headingRad,
+                double halfWidth,
+                double halfLength,
+                double halfHeight,
+                const IMap3D& map,
+                int mapResolution) {
+    const double absD = std::abs(distanceCm);
+    const double dirZ = (distanceCm >= 0) ? 1.0 : -1.0;
+
+    const double step_factor = 0.5;
+    const double step = step_factor * std::pow(10.0, -mapResolution);
+
+    const double startX = start.x.force_numerical_value_in(cm);
+    const double startY = start.y.force_numerical_value_in(cm);
+    const double startZ = start.z.force_numerical_value_in(cm);
+
+    for (double t = -halfHeight; t <= absD + halfHeight + step * 0.5; t += step) {
+        const double tt = std::min(t, absD + halfHeight);
+        const Position3D sliceCenter{
+            startX               * x_extent[cm],
+            startY               * y_extent[cm],
+            (startZ + dirZ * tt) * z_extent[cm],
+        };
+        if (checkElevateSlice(sliceCenter, halfWidth, halfLength, headingRad,
+                              map, mapResolution)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace cpp_course::DroneMath

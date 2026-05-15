@@ -283,6 +283,164 @@ int main(int argc, char* argv[]) {
         check("ROT3 rotate -90° → 270°", ok && dEq(getH(s), 270.0));
     }
 
+    std::cout << "\n=== Boxed-in tests (1-layer empty cube, walls beyond) ===\n";
+    // Map: 10x10x5 with walls everywhere EXCEPT a 3x3x3 empty cube at cells
+    // (4..6, 4..6, 1..3). Drone at the cube center (5.5, 5.5, 2.5) heading east.
+    // testDrone halfW=halfL=halfH=0.5 → body x∈[5,6], y∈[5,6], z∈[2,3] at start
+    // (all inside the empty cube). Body front face reaches wall at distance 1.
+    auto makeBoxedMap = []() {
+        std::vector<std::tuple<int,int,int>> walls;
+        for (int z = 0; z < 5; ++z)
+            for (int y = 0; y < 10; ++y)
+                for (int x = 0; x < 10; ++x)
+                    if (!(x >= 4 && x <= 6 && y >= 4 && y <= 6 && z >= 1 && z <= 3))
+                        walls.emplace_back(x, y, z);
+        return walls;
+    };
+
+    // BOX1: advance 0.5 cm east — body front at x=6.5, still inside cube → success.
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 0);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.advance(0.5 * cm);
+        check("BOX1 advance 0.5cm east within cube",
+              ok && !simF && dEq(getX(s), 6.0) && dEq(getY(s), 5.5));
+    }
+
+    // BOX2: advance 1.0 cm east — body front at x=7.0, hits wall at cell (7,5,2).
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 0);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.advance(1.0 * cm);
+        check("BOX2 advance 1.0cm east hits wall",
+              !ok && simF && dEq(getX(s), 5.5));
+    }
+
+    // BOX3: elevate 0.5 cm up — body top at z=3.5, still within cube → success.
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 0);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.elevate(0.5 * cm);
+        check("BOX3 elevate 0.5cm up within cube",
+              ok && !simF && dEq(getZ(s), 3.0));
+    }
+
+    // BOX4: elevate 1.0 cm up — body top at z=4.0, hits ceiling at cell z=4.
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 0);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.elevate(1.0 * cm);
+        check("BOX4 elevate 1.0cm up hits ceiling",
+              !ok && simF && dEq(getZ(s), 2.5));
+    }
+
+    // BOX5: elevate -1.5 cm down — body bottom at z=0.5, hits floor at cell z=0.
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 0);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.elevate(-1.5 * cm);
+        check("BOX5 elevate -1.5cm down hits floor",
+              !ok && simF && dEq(getZ(s), 2.5));
+    }
+
+    // BOX6: advance 1.5cm at 45° NE — body sweeps past cube edge into corner wall.
+    {
+        writeTestMap(mapPath, 10, 10, 5, makeBoxedMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 2.5, 45);
+        auto dr = makeDrone(1, 1, 1);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.advance(1.5 * cm);
+        check("BOX6 advance 1.5cm NE hits corner wall",
+              !ok && simF && dEq(getX(s), 5.5) && dEq(getY(s), 5.5));
+    }
+
+    std::cout << "\n=== Cross-corridor tests (drone 2x2x3, cardinals pass, diagonals fail) ===\n";
+    // Map: 12x12x7 with a '+'-shaped corridor of empty cells.
+    // A cell is empty if cx ∈ {4,5,6} OR cy ∈ {4,5,6} (all z layers identical).
+    // The 4 corner quadrants are filled with walls.
+    // Drone at (5.5, 5.5, 3.5) with body 2x2x3 (halfW=1, halfL=1, halfH=1.5).
+    // Body at rest: x∈[4.5,6.5], y∈[4.5,6.5], z∈[2,5] → all inside the corridor.
+    auto makeCrossMap = []() {
+        std::vector<std::tuple<int,int,int>> walls;
+        for (int z = 0; z < 7; ++z)
+            for (int y = 0; y < 12; ++y)
+                for (int x = 0; x < 12; ++x) {
+                    const bool inCorridor =
+                        (x >= 4 && x <= 6) || (y >= 4 && y <= 6);
+                    if (!inCorridor) walls.emplace_back(x, y, z);
+                }
+        return walls;
+    };
+
+    // 4 cardinal directions — each should succeed.
+    struct DirCase {
+        const char* name;
+        double headingDeg;
+        double endX, endY;
+    };
+    const DirCase cardinals[] = {
+        {"east",  0.0,   7.5, 5.5},
+        {"north", 90.0,  5.5, 7.5},
+        {"west",  180.0, 3.5, 5.5},
+        {"south", 270.0, 5.5, 3.5},
+    };
+    for (const auto& c : cardinals) {
+        writeTestMap(mapPath, 12, 12, 7, makeCrossMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 3.5, c.headingDeg);
+        auto dr = makeDrone(2, 2, 3);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.advance(2.0 * cm);
+        const std::string name = std::string("CROSS cardinal ") + c.name + " 2cm";
+        check(name.c_str(),
+              ok && !simF
+              && dEq(getX(s), c.endX) && dEq(getY(s), c.endY) && dEq(getZ(s), 3.5));
+    }
+
+    // 4 diagonal directions — each should fail.
+    const DirCase diagonals[] = {
+        {"NE", 45.0,  5.5, 5.5},
+        {"NW", 135.0, 5.5, 5.5},
+        {"SW", 225.0, 5.5, 5.5},
+        {"SE", 315.0, 5.5, 5.5},
+    };
+    for (const auto& d : diagonals) {
+        writeTestMap(mapPath, 12, 12, 7, makeCrossMap());
+        InputMap m; m.loadFromFile(mapPath);
+        auto s = makeState(5.5, 5.5, 3.5, d.headingDeg);
+        auto dr = makeDrone(2, 2, 3);
+        bool simF = false;
+        MockMovementDriver drv(s, dr, m, simF);
+        const bool ok = drv.advance(2.0 * cm);
+        const std::string name = std::string("CROSS diagonal ") + d.name + " 2cm";
+        check(name.c_str(),
+              !ok && simF
+              && dEq(getX(s), d.endX) && dEq(getY(s), d.endY) && dEq(getZ(s), 3.5));
+    }
+
     std::cout << "\n=== Summary: " << passed << " passed, " << failed << " failed ===\n";
     return failed > 0 ? 1 : 0;
 }

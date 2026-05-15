@@ -17,22 +17,6 @@ private:
     const InputMap&    inputMap_;
     bool&              simulationFailed_;
     [[nodiscard]] bool isOccupied(const Position3D& pos) const;
-
-    // Vertical slice perpendicular to heading: spans halfHeight in Z and
-    // halfWidth horizontally perpendicular to the heading. Used by advance().
-    [[nodiscard]] bool checkAdvanceSlice(
-        const Position3D& center,
-        double halfWidth,
-        double halfHeight,
-        double headingRad) const;
-
-    // Horizontal slice parallel to the ground: spans halfLength along heading
-    // and halfWidth perpendicular to it. Used by elevate().
-    [[nodiscard]] bool checkElevateSlice(
-        const Position3D& center,
-        double halfWidth,
-        double halfLength,
-        double headingRad) const;
 public:
     MockMovementDriver(DroneState&        state,
                        const DroneConfig& config,
