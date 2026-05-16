@@ -51,14 +51,14 @@ Position3D beamToWorldPoint(const Position3D& dronePos,
 }
 
 // ---------------------------------------------------------------------------
-//given a coordinate, return the "pixel" in the 3D map with resolution decimalPlace it fits in
+//given a coordinate, return the "cell" in the 3D map with resolution decimalPlace it fits in
 float snapValue(float value, int decimalPlaces) {
     const float factor = std::pow(10.0f, static_cast<float>(decimalPlaces));
     return std::floor(value * factor) / factor;
 }
 
 // ---------------------------------------------------------------------------
-//helper function to find the appropriate pixel in output map
+//helper function to find the appropriate cell in output map
 CellKey snapToGrid(const Position3D& worldPos, int xyResolution, int zResolution) {
     return {
         snapValue(static_cast<float>(worldPos.x.force_numerical_value_in(cm)), xyResolution),
@@ -177,7 +177,7 @@ std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientatio
 
 // ---------------------------------------------------------------------------
 // calculates step size for scan step we intend to do in a 360 spherical around the current position
-// the smaller the factor the most steps we gonna do = better coverage but less efficient.
+// the smaller the factor the more steps we gonna do = better coverage but less efficient.
 HorizontalAngle computeStepAngle(const LidarConfig& cfg) {
     double factor = 0.5; //may need to adjust this. Large FOV -> need smaller factor
     const double spacing  = cfg.circle_spacing.force_numerical_value_in(cm); //D
@@ -302,7 +302,8 @@ bool canAdvance(const Position3D& start,
     }
     return true;
 }
-
+//input: world 3D point, dist to elevate (negative for down), current xy angle, 
+//drone sizes, map to check on, map resolution  
 bool canElevate(const Position3D& start,
                 double distanceCm,
                 double headingRad,

@@ -10,7 +10,7 @@ public:
     virtual ~IMap3D() = default;
 
     // Returns the voxel value at a physical position. Implementations should
-    // return 0 for empty or out-of-bounds space and non-zero for occupied space.
+    // return 0 for empty. 1 for wall.
     [[nodiscard]] virtual int get(const Position3D& pos) const = 0;
 };
 
