@@ -4,23 +4,24 @@
 #include <cpp_course/configs.h>
 #include <cpp_course/types.h>
 
+#include <array>
 #include <unordered_set>
 #include <vector>
 
 namespace cpp_course {
 
-// Fixed-direction DFS exploration with per-level inverse-move backtracking.
-// From any visited position we consider exactly 10 candidate directions:
-//   8 horizontal: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°
-//   2 vertical:   straight up, straight down
+// Fixed-direction DFS exploration with inverse-move backtracking.
+// 10 candidate directions per position: 8 horizontal (every 45°) + 2 vertical.
 // Move step = DroneMath::computeMoveStep(config, mission).
+// Path safety is validated by DroneMath::canAdvance / canElevate using
+// BuildingMap (which now implements IMap3D — Occupied cells are walls).
 class ExplorationAlgorithm {
 public:
     ExplorationAlgorithm(BuildingMap&         buildingMap,
                          const DroneConfig&   config,
                          const MissionConfig& mission);
 
-    // Called once per Simulator iteration; returns exactly one Command.
+    // Returns one Command per call. Internal phase state persists across calls.
     [[nodiscard]] Command decide(const Position3D& currentPos,
                                  HorizontalAngle   currentHeading);
 
@@ -29,12 +30,11 @@ private:
     const DroneConfig&   config_;
     const MissionConfig& mission_;
 
-    // Each entry is the inverse command sequence for ONE level (one move from
-    // parent to child). Stored in reverse execution order so .back() is the
-    // next inverse command to issue during backtracking.
-    std::vector<std::vector<Command>> inverseStack_;
+    // Flat inverse stack. Each move pushes 1 (Rotate/Elevate) or 3 (Advance)
+    // inverse commands in reverse-execution order so .back() pops first.
+    std::vector<Command> inverseStack_;
 
-    // Snapped CellKeys of every position we have already sphere-scanned.
+    // Snapped CellKeys of every position where a sphere scan was completed.
     std::unordered_set<CellKey, CellKeyHash> visited_;
 
     enum class Phase {
@@ -47,17 +47,25 @@ private:
     Phase phase_{Phase::Scanning};
 
     // Sphere-scan progress at the current position.
-    HorizontalAngle scanXY_{};
-    Altitude        scanEl_{};
-    bool            sphereScanDone_{false};
+    HorizontalAngle scanXY_{0.0   * horizontal_angle[deg]};
+    Altitude        scanEl_{-90.0 * altitude_angle[deg]};
 
-    // Currently chosen neighbor (in world coords).
+    // Current move target (set by findNextTarget).
     Position3D nextTarget_{};
-    bool       hasTarget_{false};
 
     [[nodiscard]] HorizontalAngle computeStepAngle() const;
     [[nodiscard]] PhysicalLength  computeMoveStep()  const;
-    [[nodiscard]] double          sphereRadius()    const;
+
+    [[nodiscard]] double halfWidth()  const;
+    [[nodiscard]] double halfLength() const;
+    [[nodiscard]] double halfHeight() const;
+
+    // 10 unit-vector candidate directions, fixed priority order.
+    static const std::array<std::array<double, 3>, 10> kDirections;
+
+    // First unvisited, reachable, Empty neighbor from pos. Sets nextTarget_.
+    [[nodiscard]] bool findNextTarget(const Position3D& pos,
+                                      HorizontalAngle   heading);
 };
 
 } // namespace cpp_course

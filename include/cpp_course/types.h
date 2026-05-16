@@ -48,11 +48,12 @@ struct DroneState {
 
 // All actions the drone algorithm can request.
 enum class CommandType {
-    Rotate,    // rotate in place by angleValue degrees
-    Advance,   // move forward along heading by distanceValue cm
-    Elevate,   // move up/down by distanceValue cm (negative = down)
-    Scan,      // fire lidar in direction scanOrientation
-    Finished   // mapping complete, end simulation
+    Rotate,      // rotate in place by angleValue degrees
+    Advance,     // move forward along heading by distanceValue cm
+    Elevate,     // move up/down by distanceValue cm (negative = down)
+    Scan,        // fire lidar in direction scanOrientation
+    Finished,    // mapping complete, end simulation
+    LevelMarker  // sentinel on the inverse stack marking the start of one DFS level
 };
 
 // Issued by ExplorationAlgorithm, executed by Drone.

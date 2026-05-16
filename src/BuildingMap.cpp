@@ -1,4 +1,5 @@
 #include <cpp_course/BuildingMap.h>
+#include <cpp_course/DroneMath.h>
 
 namespace cpp_course {
 
@@ -33,6 +34,15 @@ std::vector<std::pair<CellKey, CellValue>> BuildingMap::getAllSetCells() const {
         result.push_back({key, value});
     }
     return result;
+}
+
+// IMap3D — snap world position to grid; only confirmed-Empty cells are clear.
+// Unmapped and OutOfBounds count as walls so the drone never moves into unknown
+// or off-map space.
+int BuildingMap::get(const Position3D& pos) const {
+    const CellKey key = DroneMath::snapToGrid(
+        pos, mission_.xyResolution, mission_.zResolution);
+    return (getCell(key) == CellValue::Empty) ? 0 : 1;
 }
 
 } // namespace cpp_course
