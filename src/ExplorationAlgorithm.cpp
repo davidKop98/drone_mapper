@@ -284,6 +284,8 @@ Command ExplorationAlgorithm::decide(const Position3D& currentPos, HorizontalAng
         }
 
         case Phase::Moving: {
+            //self note: this is messy because we had to add chunking since we can have limited advance/rotation.
+            //the code is cleaner without those constraints.
             // 1. Drain pending chunks first. Only one of the three is ever
             //    non-zero at a time. Rotation completing keeps us in Moving
             //    (the next call recomputes delta — should now be ~0).

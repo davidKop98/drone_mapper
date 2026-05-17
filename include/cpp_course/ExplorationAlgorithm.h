@@ -56,6 +56,9 @@ private:
     Phase phase_{Phase::Scanning}; //defaults to Scanning at start of mission
 
     // Sphere-scan progress at the current position.
+    // these will always reset when we enter scanning phase, and we will persist in scanning phase until 
+    // we do a full sphere scan. these two keep track of the current sphere part being scanned.
+    //these values are relative to the drone position
     HorizontalAngle scanXY_{0.0   * horizontal_angle[deg]};
     Altitude        scanEl_{-90.0 * altitude_angle[deg]};
 

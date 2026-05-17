@@ -30,12 +30,12 @@ Vec3 normalize(Vec3 v) {
 
 // ---------------------------------------------------------------------------
 
-//returns the coordinate of the "wall" cell this beam hit
+//returns the world coordinate of the "wall" cell this beam hit
 Position3D beamToWorldPoint(const Position3D& dronePos,
                              HorizontalAngle   droneHeading,
                              const LidarHit&   hit) {
     const double wh  = toRad(hDeg(droneHeading) + hDeg(hit.angle.horizontal));
-    const double wa  = toRad(aDeg(hit.angle.altitude));//might need to add aDeg for drone in future exercise, but for now it's always 0, so no need to add it.
+    const double wa  = toRad(aDeg(hit.angle.altitude));//might need to add drone's aDeg in future exercise, but for now it's always 0, so no need to add it.
     const double d   = hit.distance.force_numerical_value_in(cm);
 
     const double dh  = d * std::cos(wa);
@@ -70,6 +70,7 @@ CellKey snapToGrid(const Position3D& worldPos, int xyResolution, int zResolution
 // ---------------------------------------------------------------------------
 //given a position, (an absolute) direction and a max distance, walk in that direction and "save" all
 //cells which we pass up until we reach that max distance.
+//returns vector of cell keys we passed through
 std::vector<CellKey> rayMarch(const Position3D&  origin,
                                const Orientation& direction,
                                PhysicalLength     maxDist,
@@ -109,8 +110,8 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
 }
 
 // ---------------------------------------------------------------------------
-//given a scan orientaion (=circle 0 angles), computes all ABSOLUTE angles 
-//for all the beams in this scan, according to lidar configs (=D, min_dist).
+//given an ABSOLUTE scan orientaion (=circle 0 angle), computes all ABSOLUTE angles-
+//-for ALL the beams in this scan, according to lidar configs (= D, min_dist).
 //this pretty much calculates the gradient of all the beams, so we can use it in rayMarch()
 std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientation,
                                                 const LidarConfig& cfg) {
@@ -179,7 +180,7 @@ std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientatio
 // calculates step size for scan step we intend to do in a 360 spherical around the current position
 // the smaller the factor the more steps we gonna do = better coverage but less efficient.
 HorizontalAngle computeStepAngle(const LidarConfig& cfg) {
-    double factor = 0.5; //may need to adjust this. Large FOV -> need smaller factor
+    double factor = 1; //may need to adjust this. can heavily influence run time.
     const double spacing  = cfg.circle_spacing.force_numerical_value_in(cm); //D
     const double beam_min = cfg.beam_length_min.force_numerical_value_in(cm); //Zmin
     const double step_deg = factor * fromRad(atan(spacing / beam_min));
