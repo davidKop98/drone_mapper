@@ -5,6 +5,8 @@
 #include <tuple>
 #include <vector>
 
+#include <cpp_course/BuildingMap.h>
+#include <cpp_course/ExplorationAlgorithm.h>
 #include <cpp_course/InputMap.h>
 #include <cpp_course/MockMovementDriver.h>
 #include <cpp_course/MockPositionSensor.h>
@@ -439,6 +441,240 @@ int main(int argc, char* argv[]) {
         check(name.c_str(),
               !ok && simF
               && dEq(getX(s), d.endX) && dEq(getY(s), d.endY) && dEq(getZ(s), 3.5));
+    }
+
+    std::cout << "\n=== ExplorationAlgorithm smoke test ===\n";
+    // Empty BuildingMap, drone at the middle of a small mission. After the
+    // sphere scan no Empty cells exist (none have been mapped yet), so the
+    // algorithm should immediately reach Finished.
+    {
+        MissionConfig mc{};
+        mc.startPosition = Position3D{
+            5.0 * x_extent[cm], 5.0 * y_extent[cm], 2.0 * z_extent[cm]};
+        mc.startHeading  = 0.0 * horizontal_angle[deg];
+        mc.minX = 0.0  * x_extent[cm]; mc.maxX = 10.0 * x_extent[cm];
+        mc.minY = 0.0  * y_extent[cm]; mc.maxY = 10.0 * y_extent[cm];
+        mc.minZ = 0.0  * z_extent[cm]; mc.maxZ = 5.0  * z_extent[cm];
+        mc.xyResolution = 0;
+        mc.zResolution  = 0;
+
+        DroneConfig dc{};
+        dc.minPassWidth       = 1.0 * cm;
+        dc.minPassLength      = 1.0 * cm;
+        dc.minPassHeight      = 1.0 * cm;
+        dc.maxRotate          = 180.0 * horizontal_angle[deg];
+        dc.maxAdvance         = 100.0 * cm;
+        dc.maxElevate         = 100.0 * cm;
+        dc.lidar.beam_length_min = 20.0 * cm;
+        dc.lidar.beam_length_max = 120.0 * cm;
+        dc.lidar.circle_spacing  = 2.5  * cm;
+        dc.lidar.fov_circles     = 3;
+
+        BuildingMap bm(mc);
+        ExplorationAlgorithm algo(bm, dc, mc);
+
+        const Position3D pos = mc.startPosition;
+        const HorizontalAngle hdg = mc.startHeading;
+
+        bool firstIsScan = false;
+        int  scans       = 0;
+        int  finishedAt  = -1;
+        constexpr int kMaxIters = 20000;
+
+        for (int i = 0; i < kMaxIters; ++i) {
+            const Command c = algo.decide(pos, hdg);
+            if (i == 0) firstIsScan = (c.type == CommandType::Scan);
+            if (c.type == CommandType::Scan)     ++scans;
+            if (c.type == CommandType::Finished) { finishedAt = i; break; }
+        }
+
+        check("SMOKE first command is Scan", firstIsScan);
+        check("SMOKE many Scan commands issued", scans > 100);
+        check("SMOKE reaches Finished within budget", finishedAt > 0);
+
+        // Subsequent calls after Finished must keep returning Finished.
+        const Command after = algo.decide(pos, hdg);
+        check("SMOKE stays Finished after completion",
+              after.type == CommandType::Finished);
+    }
+
+    std::cout << "\n=== Chunking tests ===\n";
+    // Mini-simulator that feeds the algorithm and updates state after each
+    // command. Captures non-Scan/non-Finished moves until captureN is reached
+    // or maxIters elapses (typical sphere scan is ~5300 calls so budget high).
+    struct AlgoTrace {
+        std::vector<Command> moves;
+        int  scans     = 0;
+        bool finished  = false;
+    };
+
+    auto runAlgo = [](ExplorationAlgorithm& algo, DroneState state,
+                      int captureN, int maxIters) -> AlgoTrace {
+        constexpr double PI_LOCAL = 3.14159265358979323846;
+        AlgoTrace trace;
+        for (int i = 0; i < maxIters; ++i) {
+            const Command c = algo.decide(state.position, state.heading);
+            switch (c.type) {
+                case CommandType::Scan:
+                    ++trace.scans;
+                    break;
+                case CommandType::Finished:
+                    trace.finished = true;
+                    return trace;
+                case CommandType::Rotate: {
+                    double newDeg = state.heading.force_numerical_value_in(deg)
+                                  + c.angleValue.force_numerical_value_in(deg);
+                    newDeg = std::fmod(newDeg, 360.0);
+                    if (newDeg < 0.0) newDeg += 360.0;
+                    state.heading = newDeg * horizontal_angle[deg];
+                    trace.moves.push_back(c);
+                    break;
+                }
+                case CommandType::Advance: {
+                    const double hRad = state.heading.force_numerical_value_in(deg)
+                                        * PI_LOCAL / 180.0;
+                    const double d    = c.distanceValue.force_numerical_value_in(cm);
+                    const double newX = state.position.x.force_numerical_value_in(cm)
+                                        + std::cos(hRad) * d;
+                    const double newY = state.position.y.force_numerical_value_in(cm)
+                                        + std::sin(hRad) * d;
+                    state.position.x = newX * x_extent[cm];
+                    state.position.y = newY * y_extent[cm];
+                    trace.moves.push_back(c);
+                    break;
+                }
+                case CommandType::Elevate: {
+                    const double d    = c.distanceValue.force_numerical_value_in(cm);
+                    const double newZ = state.position.z.force_numerical_value_in(cm) + d;
+                    state.position.z  = newZ * z_extent[cm];
+                    trace.moves.push_back(c);
+                    break;
+                }
+                default: break;
+            }
+            if (static_cast<int>(trace.moves.size()) >= captureN) return trace;
+        }
+        return trace;
+    };
+
+    auto baseMission = []() {
+        MissionConfig mc{};
+        mc.startPosition = Position3D{
+            5.5 * x_extent[cm], 5.5 * y_extent[cm], 2.5 * z_extent[cm]};
+        mc.startHeading = 0.0 * horizontal_angle[deg];
+        mc.minX = 0.0 * x_extent[cm]; mc.maxX = 10.0 * x_extent[cm];
+        mc.minY = 0.0 * y_extent[cm]; mc.maxY = 10.0 * y_extent[cm];
+        mc.minZ = 0.0 * z_extent[cm]; mc.maxZ = 5.0  * z_extent[cm];
+        mc.xyResolution = 0;
+        mc.zResolution  = 0;
+        return mc;
+    };
+
+    auto baseDrone = []() {
+        DroneConfig dc{};
+        dc.minPassWidth  = 1.0 * cm;
+        dc.minPassLength = 1.0 * cm;
+        dc.minPassHeight = 1.0 * cm;
+        dc.maxRotate     = 180.0 * horizontal_angle[deg];
+        dc.maxAdvance    = 100.0 * cm;
+        dc.maxElevate    = 100.0 * cm;
+        dc.lidar.beam_length_min = 20.0 * cm;
+        dc.lidar.beam_length_max = 120.0 * cm;
+        dc.lidar.circle_spacing  = 2.5  * cm;
+        dc.lidar.fov_circles     = 3;
+        return dc;
+    };
+
+    auto markEmpty = [](BuildingMap& bm, int xLo, int xHi, int yLo, int yHi,
+                        int zLo, int zHi) {
+        for (int x = xLo; x <= xHi; ++x)
+            for (int y = yLo; y <= yHi; ++y)
+                for (int z = zLo; z <= zHi; ++z)
+                    bm.setCell(CellKey{static_cast<float>(x),
+                                       static_cast<float>(y),
+                                       static_cast<float>(z)},
+                               CellValue::Empty);
+    };
+
+    // CHUNK1: Advance 1cm with maxAdvance=0.4 → chunks as 0.4 + 0.4 + 0.2.
+    // Drone heading east, only east marked clear so no rotation needed.
+    {
+        MissionConfig mc = baseMission();
+        DroneConfig   dc = baseDrone();
+        dc.maxAdvance    = 0.4 * cm;
+
+        BuildingMap bm(mc);
+        markEmpty(bm, 5, 7, 5, 6, 2, 3); // east body sweep cells
+
+        ExplorationAlgorithm algo(bm, dc, mc);
+        DroneState state{};
+        state.position = mc.startPosition;
+        state.heading  = mc.startHeading;
+
+        const AlgoTrace t = runAlgo(algo, state, 3, 20000);
+        const bool ok = t.moves.size() == 3
+            && t.moves[0].type == CommandType::Advance
+            && dEq(t.moves[0].distanceValue.force_numerical_value_in(cm), 0.4)
+            && t.moves[1].type == CommandType::Advance
+            && dEq(t.moves[1].distanceValue.force_numerical_value_in(cm), 0.4)
+            && t.moves[2].type == CommandType::Advance
+            && dEq(t.moves[2].distanceValue.force_numerical_value_in(cm), 0.2);
+        check("CHUNK1 advance 1cm chunks 0.4+0.4+0.2", ok);
+    }
+
+    // CHUNK2: Rotate -45° with maxRotate=15° → chunks as -15 + -15 + -15,
+    // then single Advance(1cm). Drone heading 45°, target east, so delta=-45.
+    {
+        MissionConfig mc = baseMission();
+        DroneConfig   dc = baseDrone();
+        dc.maxRotate     = 15.0 * horizontal_angle[deg];
+
+        BuildingMap bm(mc);
+        markEmpty(bm, 5, 7, 5, 6, 2, 3); // east body sweep cells
+
+        ExplorationAlgorithm algo(bm, dc, mc);
+        DroneState state{};
+        state.position = mc.startPosition;
+        state.heading  = 45.0 * horizontal_angle[deg];
+
+        const AlgoTrace t = runAlgo(algo, state, 4, 20000);
+        const bool ok = t.moves.size() == 4
+            && t.moves[0].type == CommandType::Rotate
+            && dEq(t.moves[0].angleValue.force_numerical_value_in(deg), -15.0)
+            && t.moves[1].type == CommandType::Rotate
+            && dEq(t.moves[1].angleValue.force_numerical_value_in(deg), -15.0)
+            && t.moves[2].type == CommandType::Rotate
+            && dEq(t.moves[2].angleValue.force_numerical_value_in(deg), -15.0)
+            && t.moves[3].type == CommandType::Advance
+            && dEq(t.moves[3].distanceValue.force_numerical_value_in(cm), 1.0);
+        check("CHUNK2 rotate -45° chunks -15+-15+-15, then advance 1cm", ok);
+    }
+
+    // CHUNK3: Elevate 1cm with maxElevate=0.4 → chunks as 0.4 + 0.4 + 0.2.
+    // Mark only the up-body cells so all 8 horizontal directions fail and
+    // up (index 8) is the first valid direction.
+    {
+        MissionConfig mc = baseMission();
+        DroneConfig   dc = baseDrone();
+        dc.maxElevate    = 0.4 * cm;
+
+        BuildingMap bm(mc);
+        markEmpty(bm, 5, 6, 5, 6, 2, 4); // up body sweep cells
+
+        ExplorationAlgorithm algo(bm, dc, mc);
+        DroneState state{};
+        state.position = mc.startPosition;
+        state.heading  = mc.startHeading;
+
+        const AlgoTrace t = runAlgo(algo, state, 3, 20000);
+        const bool ok = t.moves.size() == 3
+            && t.moves[0].type == CommandType::Elevate
+            && dEq(t.moves[0].distanceValue.force_numerical_value_in(cm), 0.4)
+            && t.moves[1].type == CommandType::Elevate
+            && dEq(t.moves[1].distanceValue.force_numerical_value_in(cm), 0.4)
+            && t.moves[2].type == CommandType::Elevate
+            && dEq(t.moves[2].distanceValue.force_numerical_value_in(cm), 0.2);
+        check("CHUNK3 elevate 1cm chunks 0.4+0.4+0.2", ok);
     }
 
     std::cout << "\n=== Summary: " << passed << " passed, " << failed << " failed ===\n";

@@ -102,6 +102,95 @@ double ExplorationAlgorithm::halfHeight() const {
     return config_.minPassHeight.force_numerical_value_in(cm) / 2.0;
 }
 
+// ---- Chunking helpers ----------------------------------------------------
+// Forward emission: return one Command sized at most by the per-command max,
+// decrementing `remaining`. Sign of `remaining` is preserved on the chunk.
+
+Command ExplorationAlgorithm::emitRotateChunk(double& remaining) const {
+    const double maxRot = config_.maxRotate.force_numerical_value_in(deg);
+    double chunk;
+    if (maxRot <= 0.0 || std::abs(remaining) <= maxRot) {
+        chunk = remaining;
+        remaining = 0.0;
+    } else {
+        chunk = (remaining > 0.0) ? maxRot : -maxRot;
+        remaining -= chunk;
+    }
+    return makeRotate(chunk);
+}
+
+Command ExplorationAlgorithm::emitAdvanceChunk(double& remaining) const {
+    const double maxAdv = config_.maxAdvance.force_numerical_value_in(cm);
+    double chunk;
+    if (maxAdv <= 0.0 || std::abs(remaining) <= maxAdv) {
+        chunk = remaining;
+        remaining = 0.0;
+    } else {
+        chunk = (remaining > 0.0) ? maxAdv : -maxAdv;
+        remaining -= chunk;
+    }
+    return makeAdvance(chunk);
+}
+
+Command ExplorationAlgorithm::emitElevateChunk(double& remaining) const {
+    const double maxEle = config_.maxElevate.force_numerical_value_in(cm);
+    double chunk;
+    if (maxEle <= 0.0 || std::abs(remaining) <= maxEle) {
+        chunk = remaining;
+        remaining = 0.0;
+    } else {
+        chunk = (remaining > 0.0) ? maxEle : -maxEle;
+        remaining -= chunk;
+    }
+    return makeElevate(chunk);
+}
+
+// Inverse-push: push N Commands summing to `total` onto inverseStack_,
+// each chunk's magnitude ≤ the per-command max. Order within one logical
+// operation does not matter — all chunks execute consecutively and sum.
+
+void ExplorationAlgorithm::pushChunkedRotate(double total) {
+    const double maxRot = config_.maxRotate.force_numerical_value_in(deg);
+    if (std::abs(total) <= EPS_DEG) return;
+    if (maxRot <= 0.0) { inverseStack_.push_back(makeRotate(total)); return; }
+    double remaining = total;
+    while (std::abs(remaining) > maxRot) {
+        const double chunk = (remaining > 0.0) ? maxRot : -maxRot;
+        inverseStack_.push_back(makeRotate(chunk));
+        remaining -= chunk;
+    }
+    if (std::abs(remaining) > EPS_DEG)
+        inverseStack_.push_back(makeRotate(remaining));
+}
+
+void ExplorationAlgorithm::pushChunkedAdvance(double total) {
+    const double maxAdv = config_.maxAdvance.force_numerical_value_in(cm);
+    if (std::abs(total) <= EPS_CM) return;
+    if (maxAdv <= 0.0) { inverseStack_.push_back(makeAdvance(total)); return; }
+    double remaining = total;
+    while (std::abs(remaining) > maxAdv) {
+        const double chunk = (remaining > 0.0) ? maxAdv : -maxAdv;
+        inverseStack_.push_back(makeAdvance(chunk));
+        remaining -= chunk;
+    }
+    if (std::abs(remaining) > EPS_CM)
+        inverseStack_.push_back(makeAdvance(remaining));
+}
+
+void ExplorationAlgorithm::pushChunkedElevate(double total) {
+    const double maxEle = config_.maxElevate.force_numerical_value_in(cm);
+    if (std::abs(total) <= EPS_CM) return;
+    if (maxEle <= 0.0) { inverseStack_.push_back(makeElevate(total)); return; }
+    double remaining = total;
+    while (std::abs(remaining) > maxEle) {
+        const double chunk = (remaining > 0.0) ? maxEle : -maxEle;
+        inverseStack_.push_back(makeElevate(chunk));
+        remaining -= chunk;
+    }
+    if (std::abs(remaining) > EPS_CM)
+        inverseStack_.push_back(makeElevate(remaining));
+}
+
 //given current position (and horizontal heading), return true if a valid target
 //has been set as nextTarget_. else return false
 bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
@@ -110,7 +199,8 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
     const double hW = halfWidth();
     const double hL = halfLength();
     const double hH = halfHeight();
-    const int    mapRes = mission_.xyResolution;
+    const int xyRes = mission_.xyResolution;
+    const int zRes  = mission_.zResolution;
 
     const double px = pos.x.force_numerical_value_in(cm);
     const double py = pos.y.force_numerical_value_in(cm);
@@ -134,12 +224,12 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
         if (dir[2] != 0.0) { //  up/down elevate
             const double h = toRad(heading.force_numerical_value_in(deg));
             if (!DroneMath::canElevate(pos, dir[2] * step, h,
-                                       hW, hL, hH, buildingMap_, mapRes))
+                                       hW, hL, hH, buildingMap_, zRes))
                 continue;
         } else { // horizontal advance
             const double reqH = std::atan2(dir[1], dir[0]);
             if (!DroneMath::canAdvance(pos, step, reqH,
-                                       hW, hL, hH, buildingMap_, mapRes))
+                                       hW, hL, hH, buildingMap_, xyRes))
                 continue;
         }
 
@@ -194,6 +284,33 @@ Command ExplorationAlgorithm::decide(const Position3D& currentPos, HorizontalAng
         }
 
         case Phase::Moving: {
+            // 1. Drain pending chunks first. Only one of the three is ever
+            //    non-zero at a time. Rotation completing keeps us in Moving
+            //    (the next call recomputes delta — should now be ~0).
+            //    Advance/Elevate completing transitions to Scanning.
+            if (std::abs(pendingRotateDeg_) > EPS_DEG) {
+                return emitRotateChunk(pendingRotateDeg_);
+            }
+            if (std::abs(pendingAdvanceCm_) > EPS_CM) {
+                Command cmd = emitAdvanceChunk(pendingAdvanceCm_);
+                if (std::abs(pendingAdvanceCm_) <= EPS_CM) {
+                    scanXY_ =   0.0 * horizontal_angle[deg];
+                    scanEl_ = -90.0 * altitude_angle[deg];
+                    phase_  = Phase::Scanning;
+                }
+                return cmd;
+            }
+            if (std::abs(pendingElevateCm_) > EPS_CM) {
+                Command cmd = emitElevateChunk(pendingElevateCm_);
+                if (std::abs(pendingElevateCm_) <= EPS_CM) {
+                    scanXY_ =   0.0 * horizontal_angle[deg];
+                    scanEl_ = -90.0 * altitude_angle[deg];
+                    phase_  = Phase::Scanning;
+                }
+                return cmd;
+            }
+
+            // 2. No pending — compute deltas to target.
             const double dx = nextTarget_.x.force_numerical_value_in(cm)
                             - currentPos.x.force_numerical_value_in(cm);
             const double dy = nextTarget_.y.force_numerical_value_in(cm)
@@ -201,50 +318,44 @@ Command ExplorationAlgorithm::decide(const Position3D& currentPos, HorizontalAng
             const double dz = nextTarget_.z.force_numerical_value_in(cm)
                             - currentPos.z.force_numerical_value_in(cm);
 
-            // Pure vertical move. 
+            // Pure vertical move.
             if (std::abs(dz) > EPS_CM) {
-                Command cmd = makeElevate(dz);
-                inverseStack_.push_back(makeElevate(-dz));
-                scanXY_ =   0.0 * horizontal_angle[deg]; //reset scan angles since we are about-
-                scanEl_ = -90.0 * altitude_angle[deg];   //-to move and then return to scanning phase
-                phase_  = Phase::Scanning;
-                return cmd; //send elevate command
+                pendingElevateCm_ = dz;
+                pushChunkedElevate(-dz);   // inverse: opposite sign
+                return decide(currentPos, currentHeading); // emit first chunk
             }
 
             // Horizontal move — rotate first if needed.
-            const double horiz = std::sqrt(dx * dx + dy * dy); //horizontal distance to target
+            const double horiz = std::sqrt(dx * dx + dy * dy);
             if (horiz > EPS_CM) {
-                const double requiredDeg = toDeg(std::atan2(dy, dx)); //absolute needed angle
+                const double requiredDeg = toDeg(std::atan2(dy, dx));
                 const double curDeg      = currentHeading.force_numerical_value_in(deg);
                 const double delta       = wrapTo180(requiredDeg - curDeg);
 
-                if (std::abs(delta) > EPS_DEG) { //need to rotate before advance
-                    Command cmd = makeRotate(delta);
-                    inverseStack_.push_back(makeRotate(-delta));
-                    return cmd; // remain in Moving; do NOT reset scan
+                if (std::abs(delta) > EPS_DEG) {
+                    pendingRotateDeg_ = delta;
+                    pushChunkedRotate(-delta);   // inverse rotation
+                    return decide(currentPos, currentHeading); // emit first chunk
                 }
-                //no need to rotate (we already rotated), can advance directly
-                Command cmd = makeAdvance(horiz);
-                // Push 3 inverses in reverse-execution order;
-                // pop order during backtrack: Rot(-180), Adv(d), Rot(180).
-                inverseStack_.push_back(makeRotate( 180.0)); // executes 3rd
-                inverseStack_.push_back(makeAdvance(horiz)); // executes 2nd
-                inverseStack_.push_back(makeRotate(-180.0)); // executes 1st
-                scanXY_ =   0.0 * horizontal_angle[deg]; //reset scaning angle since we about to arrive in new pos
-                scanEl_ = -90.0 * altitude_angle[deg];
-                phase_  = Phase::Scanning;
-                return cmd;
+
+                // Already facing target — advance.
+                pendingAdvanceCm_ = horiz;
+                // Push 3-part inverse (each part itself chunked).
+                // Execution order during backtrack: Rot(180), Adv(horiz), Rot(-180).
+                // Reverse-execution push order: Rot(-180) chunks, Adv chunks, Rot(180) chunks.
+                pushChunkedRotate(-180.0);  // executed 3rd (popped last)
+                pushChunkedAdvance(horiz);  // executed 2nd
+                pushChunkedRotate( 180.0);  // executed 1st (popped first)
+                return decide(currentPos, currentHeading); // emit first chunk
             }
 
-            // Already at target (shouldn't normally happen with non-zero step).
+            // Already at target (shouldn't normally happen).
             // Pop the level marker we opened in ChoosingNext to keep the stack clean.
             if (!inverseStack_.empty()
                 && inverseStack_.back().type == CommandType::LevelMarker) {
                 inverseStack_.pop_back();
             }
-            //we shouldnt reach this step (only happens when our target was at very short distance from our pos)
-            //but if we do end up here, start looking for a new target. 
-            phase_ = Phase::ChoosingNext; //(no need to scan since we already scanned in this position if we reached this phase)                  
+            phase_ = Phase::ChoosingNext;
             return decide(currentPos, currentHeading);
         }
 

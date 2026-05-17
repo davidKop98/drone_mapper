@@ -15,6 +15,15 @@ namespace cpp_course {
 // Move step = DroneMath::computeMoveStep(config, mission).
 // Path safety is validated by DroneMath::canAdvance / canElevate using
 // BuildingMap (which now implements IMap3D — Occupied cells are walls).
+
+//The logic is as follows: 
+//1)We start in scanning phase -> we keep in scanning phase until we do a full sphere ->procceed to ChoosingNext phase
+//2)ChoosingNext phase-> we look for a valid target in 10 directions. 
+//If we find one, we set it as nextTarget_ and move to Moving phase. If we dont find any, we move to Backtracking phase
+//3)backtracking phase -> we pop commands from inverseStack_ and execute them until we pop a LevelMarker (which indicates we fully backtracked to the parent pos of the current target). 
+//Once we pop the LevelMarker, we move to ChoosingNext phase to look for a new target (without rescanning since we already scanned in this pos before). 
+//4)Moving phase -> we first rotate towards the target if needed, then we advance to it. During this process we
+// also push the inverse commands to the inverseStack_ so that we can backtrack later if needed. Once we arrive in the new pos, we move back to Scanning phase to start scanning in the new pos.
 class ExplorationAlgorithm {
 public:
     ExplorationAlgorithm(BuildingMap&         buildingMap,
@@ -44,7 +53,7 @@ private:
         Backtracking,
         Finished,
     };
-    Phase phase_{Phase::Scanning};
+    Phase phase_{Phase::Scanning}; //defaults to Scanning at start of mission
 
     // Sphere-scan progress at the current position.
     HorizontalAngle scanXY_{0.0   * horizontal_angle[deg]};
@@ -52,6 +61,13 @@ private:
 
     // Current move target (set by findNextTarget).
     Position3D nextTarget_{};
+
+    // Per-decide chunking state. When non-zero, Phase::Moving emits one chunk
+    // of this amount (capped by the corresponding max in DroneConfig) and
+    // decrements until 0. Only one of the three is non-zero at a time.
+    double pendingRotateDeg_{0.0};
+    double pendingAdvanceCm_{0.0};
+    double pendingElevateCm_{0.0};
 
     [[nodiscard]] HorizontalAngle computeStepAngle() const;
     [[nodiscard]] PhysicalLength  computeMoveStep()  const;
@@ -66,6 +82,18 @@ private:
     // First unvisited, reachable, Empty neighbor from pos. Sets nextTarget_.
     [[nodiscard]] bool findNextTarget(const Position3D& pos,
                                       HorizontalAngle   heading);
+
+    // Forward chunk emission. Returns one Command sized at most by the
+    // corresponding max in DroneConfig, and decrements `remaining`.
+    [[nodiscard]] Command emitRotateChunk (double& remaining) const;
+    [[nodiscard]] Command emitAdvanceChunk(double& remaining) const;
+    [[nodiscard]] Command emitElevateChunk(double& remaining) const;
+
+    // Inverse-push helpers: push N chunks summing to `total` onto inverseStack_.
+    // Each chunk's magnitude ≤ the corresponding max in DroneConfig.
+    void pushChunkedRotate (double total);
+    void pushChunkedAdvance(double total);
+    void pushChunkedElevate(double total);
 };
 
 } // namespace cpp_course
