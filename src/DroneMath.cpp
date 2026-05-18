@@ -1,4 +1,5 @@
 #include <cpp_course/DroneMath.h>
+#include <cpp_course/Profiler.h>
 
 #include <algorithm>
 #include <cmath>
@@ -68,6 +69,8 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
                                PhysicalLength     maxDist,
                                int xyResolution,
                                int zResolution) {
+    ++profiler::rayMarch_calls;
+    profiler::ScopedTimer _t(profiler::rayMarch_total_ns);
     //smaller factor = smaller steps while "collecting" all cells in the direction of the beam, up to max distance
     double factor = 0.3;
     const int maxRes = std::max(xyResolution, zResolution);
@@ -95,8 +98,10 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
             (oz + dz * dist) * z_extent[cm],
         };
         const CellKey key = snapToGrid(p, xyResolution, zResolution);
-        if (seen.insert(key).second)
+        if (seen.insert(key).second) {
             result.push_back(key);
+            ++profiler::rayMarch_cells_pushed;
+        }
     }
     return result;
 }
@@ -154,10 +159,11 @@ std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientatio
 // the smaller the factor the more steps we gonna do = better coverage but less efficient.
 HorizontalAngle computeStepAngle(const LidarConfig& cfg) {
     double factor = 1; //may need to adjust this. can heavily influence run time.
+    double maxStepAngle = 5.0;
     const double spacing  = cfg.circle_spacing.force_numerical_value_in(cm); //D
     const double beam_min = cfg.beam_length_min.force_numerical_value_in(cm); //Zmin
     const double step_deg = factor * fromRad(atan(spacing / beam_min));
-    return step_deg * horizontal_angle[deg];
+    return std::min(maxStepAngle, step_deg) * horizontal_angle[deg];
 }
 
 // ---------------------------------------------------------------------------

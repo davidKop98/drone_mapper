@@ -1,5 +1,6 @@
 #include <cpp_course/Drone.h>
 #include <cpp_course/DroneMath.h>
+#include <cpp_course/Profiler.h>
 
 #include <cmath>
 
@@ -38,6 +39,8 @@ Drone::Drone(const ILidarSensor&    lidar,
     , mission_(mission) {}
 
 Command Drone::getNextCommand() {
+    ++profiler::decide_calls;
+    profiler::ScopedTimer _t(profiler::decide_total_ns);
     const Position3D     pos = posSensor_.position();
     const HorizontalAngle hdg = posSensor_.heading().horizontal;
     return algorithm_.decide(pos, hdg);
@@ -81,6 +84,8 @@ void Drone::markEmpty(const CellKey& key) {
 //for each beam in results (=hits): update the map for those beams up to beam distance. (ignore 0 dist beams)
 //for each beam in [allBeams\results] : update map up until max beam length. (dont overwrite walls->shouldnt happen anyway)
 void Drone::processScan(const ScanResults& results,const Orientation& relScanOrientation) {
+    ++profiler::processScan_calls;
+    profiler::ScopedTimer _t(profiler::processScan_total_ns);
     const Position3D     pos    = posSensor_.position();
     const HorizontalAngle hdg   = posSensor_.heading().horizontal;
     const double         hdgDeg = hdg.force_numerical_value_in(deg);
@@ -123,10 +128,13 @@ void Drone::processScan(const ScanResults& results,const Orientation& relScanOri
 
                 // Nudge forward along the beam so floor() snaps into the wall
                 // cell rather than the interior cell at exact boundary hits.
+                // Use a TINY nudge (~1e-6 cell): just enough to escape an
+                // exact integer boundary, small enough to never cross a
+                // non-boundary hit into a neighbouring cell.
                 constexpr double kPI = 3.14159265;
                 const double bh = beam.horizontal.force_numerical_value_in(deg) * kPI / 180.0;
                 const double ba = beam.altitude.force_numerical_value_in(deg)   * kPI / 180.0;
-                const double nudge = 0.005 * std::pow(10.0, -static_cast<double>(std::max(xyR, zR)));
+                const double nudge = 1e-6 * std::pow(10.0, -static_cast<double>(std::max(xyR, zR)));
                 const Position3D nudgedHit{
                     (hitPos.x.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::cos(bh)) * x_extent[cm],
                     (hitPos.y.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::sin(bh)) * y_extent[cm],

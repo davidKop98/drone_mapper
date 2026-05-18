@@ -107,7 +107,8 @@ std::optional<PhysicalLength> MockLidarSensor::traceBeam(const Orientation& beam
 
     // March along the ray from the configured near distance to the far distance,
     // sampling one point every centimeter.
-    const PhysicalLength step = PhysicalLength{0.1 * cm}; //self note: might need to make step smaller for better accuracy
+    double step_dist = 0.1;
+    const PhysicalLength step = PhysicalLength{step_dist * cm}; //self note: might need to make step smaller for better accuracy
     
     const PhysicalLength min_distance = std::min(config_.beam_length_min, step);
 
