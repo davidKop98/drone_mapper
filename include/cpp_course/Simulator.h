@@ -30,6 +30,10 @@ public:
     [[nodiscard]] float computeScore();
     void                writeOutput(const std::string& path);
 
+    // Diagnostics — populated by run().
+    [[nodiscard]] int  commandCount()     const { return commandCount_; }
+    [[nodiscard]] bool finishedNormally() const { return finishedNormally_; }
+
 private:
     DroneState    state_{};
     bool          simulationFailed_{false};
@@ -46,6 +50,9 @@ private:
     std::unique_ptr<Drone>                drone_;
 
     std::vector<std::string> inputErrors_;
+
+    int  commandCount_{0};
+    bool finishedNormally_{false};
 };
 
 } // namespace cpp_course

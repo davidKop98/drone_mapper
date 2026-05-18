@@ -14,5 +14,7 @@ int main(int argc, char* argv[]) {
     sim.run();
     sim.writeOutput(path);
     std::cout << "Score: " << sim.computeScore() << "/100\n";
+    std::cout << "Commands executed: " << sim.commandCount() << "\n";
+    std::cout << "Status: " << (sim.finishedNormally() ? "FINISHED" : "FAILED") << "\n";
     return 0;
 }

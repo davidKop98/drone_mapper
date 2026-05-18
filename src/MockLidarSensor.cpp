@@ -37,7 +37,7 @@ MockLidarSensor::MockLidarSensor(LidarConfig config,
 
 ScanResults MockLidarSensor::scan(Orientation rel_scan_orientation) const {
     ScanResults results;
-    if (config_.fov_circles == 0) { //no circles
+    if (config_.fov_circles == 0) { //no circles = no scans
         return results;
     }
 

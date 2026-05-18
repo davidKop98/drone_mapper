@@ -76,12 +76,11 @@ void Drone::markEmpty(const CellKey& key) {
         buildingMap_.setCell(key, CellValue::Empty);
 }
 
-//result = all hit beams scan found in the relative orientation (=relScanOrientation). 
+//result = all hit-beams scan found in the relative orientation (=relScanOrientation). 
 //the scan process is as follows:
 //for each beam in results (=hits): update the map for those beams up to beam distance. (ignore 0 dist beams)
 //for each beam in [allBeams\results] : update map up until max beam length. (dont overwrite walls->shouldnt happen anyway)
-void Drone::processScan(const ScanResults& results,
-                        const Orientation& relScanOrientation) {
+void Drone::processScan(const ScanResults& results,const Orientation& relScanOrientation) {
     const Position3D     pos    = posSensor_.position();
     const HorizontalAngle hdg   = posSensor_.heading().horizontal;
     const double         hdgDeg = hdg.force_numerical_value_in(deg);
@@ -122,7 +121,23 @@ void Drone::processScan(const ScanResults& results,
 
                 const Position3D hitPos = DroneMath::beamToWorldPoint(
                     pos, hdg, *matched);
-                const CellKey hitKey = DroneMath::snapToGrid(hitPos, xyR, zR);
+
+                // Nudge the hit point a tiny amount forward along the beam
+                // direction before snapping. Without this, a hit that lands
+                // exactly on a cell boundary face (e.g. x=1.0 for the west
+                // wall at cx=0) maps via floor() to the interior cell instead
+                // of the wall cell.
+                constexpr double kPI = 3.14159265;
+                const double bh = beam.horizontal.force_numerical_value_in(deg) * kPI / 180.0;
+                const double ba = beam.altitude.force_numerical_value_in(deg)   * kPI / 180.0;
+                const double nudge = 0.005 * std::pow(10.0, -static_cast<double>(std::max(xyR, zR)));
+                const Position3D nudgedHit{
+                    (hitPos.x.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::cos(bh)) * x_extent[cm],
+                    (hitPos.y.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::sin(bh)) * y_extent[cm],
+                    (hitPos.z.force_numerical_value_in(cm) + nudge * std::sin(ba))                 * z_extent[cm],
+                };
+
+                const CellKey hitKey = DroneMath::snapToGrid(nudgedHit, xyR, zR);
                 buildingMap_.setCell(hitKey, CellValue::Occupied);
             }
             // distCm == 0: too close to measure — we know SOMETHING is near

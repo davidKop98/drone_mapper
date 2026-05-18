@@ -55,9 +55,15 @@ bool Simulator::loadConfigs(const std::string& path) {
 }
 
 void Simulator::run() {
+    commandCount_     = 0;
+    finishedNormally_ = false;
     while (true) {
         const Command cmd = drone_->getNextCommand();
-        if (cmd.type == CommandType::Finished) break;
+        if (cmd.type == CommandType::Finished) {
+            finishedNormally_ = true;
+            break;
+        }
+        ++commandCount_;
         if (!drone_->execute(cmd)) {
             std::cout << "SIMULATION FAILED - collision detected\n";
             break;
