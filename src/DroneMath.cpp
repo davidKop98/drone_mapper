@@ -112,7 +112,6 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
 // ---------------------------------------------------------------------------
 //given an ABSOLUTE scan orientaion (=circle 0 angle), computes all ABSOLUTE angles-
 //-for ALL the beams in this scan, according to lidar configs (= D, min_dist).
-//this pretty much calculates the gradient of all the beams, so we can use it in rayMarch()
 std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientation,
                                                 const LidarConfig& cfg) {
     std::vector<Orientation> result;

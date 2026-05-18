@@ -29,7 +29,9 @@ public:
     [[nodiscard]] Command getNextCommand();
 
     // Executes the given command via the appropriate interface.
-    void execute(const Command& cmd);
+    // Returns false if movement collided (Advance/Elevate driver returned false);
+    // all other command types always return true.
+    [[nodiscard]] bool execute(const Command& cmd);
 
 private:
     const ILidarSensor&    lidar_;

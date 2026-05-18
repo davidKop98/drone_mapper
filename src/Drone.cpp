@@ -43,7 +43,7 @@ Command Drone::getNextCommand() {
     return algorithm_.decide(pos, hdg);
 }
 
-void Drone::execute(const Command& cmd) {
+bool Drone::execute(const Command& cmd) {
     switch (cmd.type) {
         case CommandType::Scan: {
             // Lidar takes a drone-relative orientation; the algorithm already
@@ -53,13 +53,13 @@ void Drone::execute(const Command& cmd) {
             break;
         }
         case CommandType::Rotate:
-            (void)driver_.rotate(cmd.angleValue);
+            (void)driver_.rotate(cmd.angleValue); // rotation cannot fail in ex1
             break;
         case CommandType::Advance:
-            (void)driver_.advance(cmd.distanceValue);
+            if (!driver_.advance(cmd.distanceValue)) return false;
             break;
         case CommandType::Elevate:
-            (void)driver_.elevate(cmd.distanceValue);
+            if (!driver_.elevate(cmd.distanceValue)) return false;
             break;
         case CommandType::LevelMarker:
         case CommandType::Finished:
@@ -67,6 +67,7 @@ void Drone::execute(const Command& cmd) {
             // Internal algorithm sentinels — no-op for the Drone.
             break;
     }
+    return true;
 }
 
 void Drone::markEmpty(const CellKey& key) {
@@ -75,19 +76,19 @@ void Drone::markEmpty(const CellKey& key) {
         buildingMap_.setCell(key, CellValue::Empty);
 }
 
+//result = all hit beams scan found in the relative orientation (=relScanOrientation). 
 //the scan process is as follows:
 //for each beam in results (=hits): update the map for those beams up to beam distance. (ignore 0 dist beams)
-//for each beam in [allBeams\results] : update map up until max beam length.(dont overwrite walls->shouldnt happen anyway)
+//for each beam in [allBeams\results] : update map up until max beam length. (dont overwrite walls->shouldnt happen anyway)
 void Drone::processScan(const ScanResults& results,
                         const Orientation& relScanOrientation) {
     const Position3D     pos    = posSensor_.position();
     const HorizontalAngle hdg   = posSensor_.heading().horizontal;
     const double         hdgDeg = hdg.force_numerical_value_in(deg);
 
-    // World scan orientation = drone heading + relative scan orientation.
+    // World scan orientation = drone heading + relative scan orientation = circle 0 absolute direction 
     const Orientation worldScan{
-        (hdgDeg + relScanOrientation.horizontal.force_numerical_value_in(deg))
-            * horizontal_angle[deg],
+        (hdgDeg + relScanOrientation.horizontal.force_numerical_value_in(deg))* horizontal_angle[deg],
         relScanOrientation.altitude,
     };
 
@@ -103,22 +104,20 @@ void Drone::processScan(const ScanResults& results,
         // hit.angle is drone-relative, so convert by adding hdgDeg.
         const LidarHit* matched = nullptr;
         for (const auto& hit : results) {
-            const double hitWorldH = hdgDeg
-                + hit.angle.horizontal.force_numerical_value_in(deg);
+            const double hitWorldH = hdgDeg + hit.angle.horizontal.force_numerical_value_in(deg);
             const double hitA = hit.angle.altitude.force_numerical_value_in(deg);
-            if (angleDiff(beamH, hitWorldH) < EPS_DEG
-                && std::abs(beamA - hitA) < EPS_DEG) {
+            //use EPS_DEG to know if they are equal,since floating point can be slightly missmatched
+            if (angleDiff(beamH, hitWorldH) < EPS_DEG && std::abs(beamA - hitA) < EPS_DEG) {
                 matched = &hit;
                 break;
             }
         }
 
-        if (matched != nullptr) {
+        if (matched != nullptr) { //beam hit
             const double distCm = matched->distance.force_numerical_value_in(cm);
             if (distCm > 0.0) {
                 // Real hit: path up to hit is Empty; endpoint is Occupied.
-                const auto cells = DroneMath::rayMarch(
-                    pos, beam, matched->distance, xyR, zR);
+                const auto cells = DroneMath::rayMarch(pos, beam, matched->distance, xyR, zR);
                 for (const auto& k : cells) markEmpty(k);
 
                 const Position3D hitPos = DroneMath::beamToWorldPoint(
@@ -128,10 +127,9 @@ void Drone::processScan(const ScanResults& results,
             }
             // distCm == 0: too close to measure — we know SOMETHING is near
             // but not where, so we deliberately make no map update.
-        } else {
+        } else { 
             // No hit at all — clear out to beam_length_max along this ray.
-            const auto cells = DroneMath::rayMarch(
-                pos, beam, config_.lidar.beam_length_max, xyR, zR);
+            const auto cells = DroneMath::rayMarch(pos, beam, config_.lidar.beam_length_max, xyR, zR);
             for (const auto& k : cells) markEmpty(k);
         }
     }
