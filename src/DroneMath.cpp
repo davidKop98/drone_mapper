@@ -18,14 +18,6 @@ double fromRad(double r) { return r * 180.0 / PI; }
 double hDeg(HorizontalAngle a) { return a.force_numerical_value_in(deg); }
 double aDeg(Altitude a)         { return a.force_numerical_value_in(deg); }
 
-struct Vec3 { double x, y, z; };
-
-Vec3 normalize(Vec3 v) {
-    const double len = std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
-    if (len < 1e-12) return v;
-    return {v.x/len, v.y/len, v.z/len};
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -117,58 +109,40 @@ std::vector<Orientation> computeBeamDirections(const Orientation& scanOrientatio
     std::vector<Orientation> result;
     if (cfg.fov_circles == 0) return result;
 
-    const double h  = toRad(hDeg(scanOrientation.horizontal));
-    const double a  = toRad(aDeg(scanOrientation.altitude));
-    const double ca = std::cos(a), sa = std::sin(a);
-    const double ch = std::cos(h), sh = std::sin(h);
-
-    // Forward unit vector F in the direction of scanOrientation
-    const Vec3 F{ca*ch, ca*sh, sa};
-
-    // Right vector R: perpendicular to F in the horizontal plane
-    const Vec3 R{-sh, ch, 0.0};
-
-    // Up vector U = F cross R (perpendicular to both F and R)
-    const Vec3 U{
-        F.y*R.z - F.z*R.y,
-        F.z*R.x - F.x*R.z,
-        F.x*R.y - F.y*R.x,
-    };
-
-    // Circle 0: center beam — use scanOrientation angles directly (same as F converted back)
+    // Circle 0: center beam is the scan orientation itself.
     result.push_back(scanOrientation);
 
     const double spacing  = cfg.circle_spacing.force_numerical_value_in(cm);
     const double beam_min = cfg.beam_length_min.force_numerical_value_in(cm);
 
+    // Use the same separable-atan formula as MockLidarSensor so that
+    // computeBeamDirections and the lidar agree on beam angles.  The 3-D
+    // vector approach diverges from the separable formula when scanEl ≠ 0,
+    // causing false "no-hit" treatments and incorrect Empty markings.
+    const double scanH = hDeg(scanOrientation.horizontal);
+    const double scanA = aDeg(scanOrientation.altitude);
+
     for (std::size_t circle = 1; circle < cfg.fov_circles; ++circle) {
-        // beam_count = 4^circle
         const auto beam_count = static_cast<std::size_t>(
             std::round(std::pow(4.0, static_cast<double>(circle))));
 
-        // tan(beam_angle) = N * spacing / beam_min  [since tan(atan(x)) = x]
-        const double tan_angle =
-            static_cast<double>(circle) * spacing / beam_min;
+        const double radius = static_cast<double>(circle) * spacing;
 
         for (std::size_t i = 0; i < beam_count; ++i) {
             const double theta = 2.0 * PI * static_cast<double>(i)
                                / static_cast<double>(beam_count);
-            const double ct = std::cos(theta), st = std::sin(theta);
 
-            // offset = cos(theta)*R + sin(theta)*U  (unit vector on circle rim)
-            const Vec3 offset{ct*R.x + st*U.x,
-                              ct*R.y + st*U.y,
-                              ct*R.z + st*U.z};
-
-            // direction = normalize(F + tan_angle * offset)
-            const Vec3 d = normalize(Vec3{
-                F.x + tan_angle * offset.x,
-                F.y + tan_angle * offset.y,
-                F.z + tan_angle * offset.z});
+            // Separable offsets matching MockLidarSensor::scan():
+            //   horizontal_offset = radius * cos(theta)
+            //   altitude_offset   = radius * sin(theta)
+            //   h_delta = atan2(horizontal_offset, beam_min)
+            //   a_delta = atan2(altitude_offset,   beam_min)
+            const double h_delta = std::atan2(radius * std::cos(theta), beam_min);
+            const double a_delta = std::atan2(radius * std::sin(theta), beam_min);
 
             result.push_back(Orientation{
-                fromRad(std::atan2(d.y, d.x)) * horizontal_angle[deg],
-                fromRad(std::asin(std::clamp(d.z, -1.0, 1.0))) * altitude_angle[deg],
+                (scanH + fromRad(h_delta)) * horizontal_angle[deg],
+                (scanA + fromRad(a_delta)) * altitude_angle[deg],
             });
         }
     }
