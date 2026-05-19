@@ -37,8 +37,12 @@ bool MockMovementDriver::rotate(HorizontalAngle angle) {
 bool MockMovementDriver::advance(PhysicalLength distance) {
     const double h  = toRad(state_.heading.force_numerical_value_in(deg));
     const double d  = distance.force_numerical_value_in(cm);
-    const double fx = std::cos(h);
-    const double fy = std::sin(h);
+    // Snap to {-1, 0, 1} for cardinal headings: std::sin(π) returns ~1.22e-16
+    // instead of 0. Without snapping, position drifts ~1 ULP per move; over
+    // hundreds of moves with an integer-halfWidth drone, the drift carries
+    // the body's edge across a cell boundary and into a wall cell.
+    const double fx = DroneMath::snapCardinal(std::cos(h));
+    const double fy = DroneMath::snapCardinal(std::sin(h));
 
     const double halfWidth  = config_.minPassWidth.force_numerical_value_in(cm)  / 2.0;
     const double halfLength = config_.minPassLength.force_numerical_value_in(cm) / 2.0;

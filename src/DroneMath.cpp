@@ -1,8 +1,11 @@
 #include <cpp_course/DroneMath.h>
 #include <cpp_course/Profiler.h>
 
+#include <mp-units/systems/si/math.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <unordered_set>
 #include <vector>
 
@@ -10,7 +13,13 @@ namespace cpp_course::DroneMath {
 
 namespace {
 
-constexpr double PI = 3.1415926535;
+// Full-precision π — closest double to true π. The previous truncated
+// value (3.1415926535) was off by ~9e-11, and that drift accumulated
+// through atan2 → toDeg → rotate-chunking → toRad → cos/sin, so headings
+// like 270° ended up as 269.9999999983°. With a 2x2 drone, that's enough
+// for perpendicular samples to leak one cell sideways and trip canAdvance
+// against an actual wall — caused a spurious collision in test_big_2floors.
+constexpr double PI = 3.14159265358979323846;
 
 double toRad(double d) { return d * PI / 180.0; }
 double fromRad(double r) { return r * 180.0 / PI; }
@@ -21,30 +30,58 @@ double aDeg(Altitude a)         { return a.force_numerical_value_in(deg); }
 
 } // namespace
 
+// Snap a sin/cos result to {-1, 0, 1} when within FP tolerance.
+// std::sin(π) returns ~1.22e-16 instead of 0, std::cos(3π/2) similar.
+// For drones with integer halfWidth (e.g. 2x2), perpendicular samples land
+// on exact cell boundaries — any FP residue in vec2X/vec2Y shoves the
+// sample one ULP to the wrong side and into an adjacent cell. Snapping
+// the trig outputs eliminates this without changing any non-cardinal
+// direction (where the values aren't near integers).
+// Public (also called from MockMovementDriver to keep position-update
+// math in sync with the collision check).
+double snapCardinal(double v) {
+    constexpr double tol = 1e-10;       // far above FP error (~1e-15), far below cell size
+    if (std::abs(v) < tol) return 0.0;
+    if (std::abs(v - 1.0) < tol) return 1.0;
+    if (std::abs(v + 1.0) < tol) return -1.0;
+    return v;
+}
+
 // ---------------------------------------------------------------------------
 
-//returns the world coordinate of the "wall" cell this beam hit
+// Reconstruct the world-space point where the lidar beam terminated.
+//
+// Math MUST match MockLidarSensor::traceBeam bit-for-bit: same mp-units
+// si::cos/sin, same operation order. The previous raw-double formula
+// (toRad + std::cos/sin, with d pre-factored) diverged by FP epsilon for
+// some beam angles, causing the Drone to snap the hit to a cell adjacent
+// to the one the lidar actually sampled. Symptom: doorway cells and
+// stairwell cells getting wrongly marked Occupied, blocking navigation.
 Position3D beamToWorldPoint(const Position3D& dronePos,
                              HorizontalAngle   droneHeading,
                              const LidarHit&   hit) {
-    const double wh  = toRad(hDeg(droneHeading) + hDeg(hit.angle.horizontal));
-    const double wa  = toRad(aDeg(hit.angle.altitude));//might need to add drone's aDeg in future exercise, but for now it's always 0, so no need to add it.
-    const double d   = hit.distance.force_numerical_value_in(cm);
+    // Absolute beam orientation (drone altitude is always 0 in this exercise).
+    const HorizontalAngle world_horizontal = droneHeading + hit.angle.horizontal;
+    const Altitude        world_altitude   = hit.angle.altitude;
 
-    const double dh  = d * std::cos(wa);
-    const double dx  = dh * std::cos(wh);
-    const double dy  = dh * std::sin(wh);
-    const double dz  = d  * std::sin(wa);
+    const auto cos_altitude = si::cos(world_altitude);
+    const auto dx = cos_altitude * si::cos(world_horizontal);
+    const auto dy = cos_altitude * si::sin(world_horizontal);
+    const auto dz = si::sin(world_altitude);
 
     return {
-        dronePos.x + dx * x_extent[cm],
-        dronePos.y + dy * y_extent[cm],
-        dronePos.z + dz * z_extent[cm],
+        dronePos.x + dx.force_numerical_value_in(mp::one) * hit.distance.force_numerical_value_in(cm) * x_extent[cm],
+        dronePos.y + dy.force_numerical_value_in(mp::one) * hit.distance.force_numerical_value_in(cm) * y_extent[cm],
+        dronePos.z + dz.force_numerical_value_in(mp::one) * hit.distance.force_numerical_value_in(cm) * z_extent[cm],
     };
 }
 
 // ---------------------------------------------------------------------------
-//given a coordinate, return the "cell" in the 3D map with resolution decimalPlace it fits in
+// Snap to cell boundary at the given resolution. The float-cast on the input
+// is intentional and load-bearing: it absorbs ~1e-7 of FP drift accumulated
+// from cos/sin(π) etc. during movement, keeping the drone's stored position
+// snapped to the cell it logically occupies. Don't change to double floor
+// without also addressing position-drift accumulation.
 float snapValue(float value, int decimalPlaces) {
     const float factor = std::pow(10.0f, static_cast<float>(decimalPlaces));
     return std::floor(value * factor) / factor;
@@ -181,6 +218,7 @@ PhysicalLength computeMoveStep(const DroneConfig&   droneConfig,
 
 // ---------------------------------------------------------------------------
 // Collision-checking helpers (moved from MockMovementDriver; logic unchanged).
+//returns TRUE IF WE HIT A WALL
 bool checkAdvanceSlice(const Position3D& center,
                        double halfWidth,
                        double halfHeight,
@@ -190,8 +228,10 @@ bool checkAdvanceSlice(const Position3D& center,
     const double cellSize = std::pow(10.0, -mapResolution);
 
     // vec2: horizontal unit vector perpendicular to heading.
-    const double vec2X = -std::sin(headingRad);
-    const double vec2Y =  std::cos(headingRad);
+    // Snap cardinals — sin(π) returns ~1e-16, and with integer halfWidth
+    // that FP residue shoves perpendicular samples one cell sideways.
+    const double vec2X = snapCardinal(-std::sin(headingRad));
+    const double vec2Y = snapCardinal( std::cos(headingRad));
 
     const double stepI = (halfHeight > 0) ? cellSize / halfHeight : 1.0;
     const double stepJ = (halfWidth  > 0) ? cellSize / halfWidth  : 1.0;
@@ -209,10 +249,18 @@ bool checkAdvanceSlice(const Position3D& center,
                 (cy + fj * halfWidth  * vec2Y) * y_extent[cm],
                 (cz + fi * halfHeight)         * z_extent[cm],
             };
-            if (map.get(sample) != 0) return true;
+            if (map.get(sample) != 0) {
+                std::printf("[HIT-A] center=(%.17g,%.17g,%.17g) hRad=%.17g fi=%.5g fj=%.5g sample=(%.17g,%.17g,%.17g) vec2=(%.17g,%.17g)\n",
+                            cx, cy, cz, headingRad, fi, fj,
+                            sample.x.force_numerical_value_in(cm),
+                            sample.y.force_numerical_value_in(cm),
+                            sample.z.force_numerical_value_in(cm),
+                            vec2X, vec2Y);
+                return true; //hit a wall
+            }
         }
     }
-    return false;
+    return false; //no wall hit
 }
 
 bool checkElevateSlice(const Position3D& center,
@@ -223,10 +271,10 @@ bool checkElevateSlice(const Position3D& center,
                        int mapResolution) {
     const double cellSize = std::pow(10.0, -mapResolution);
 
-    const double vec1X =  std::cos(headingRad);
-    const double vec1Y =  std::sin(headingRad);
-    const double vec2X = -std::sin(headingRad);
-    const double vec2Y =  std::cos(headingRad);
+    const double vec1X = snapCardinal( std::cos(headingRad));
+    const double vec1Y = snapCardinal( std::sin(headingRad));
+    const double vec2X = snapCardinal(-std::sin(headingRad));
+    const double vec2Y = snapCardinal( std::cos(headingRad));
 
     const double stepI = (halfLength > 0) ? cellSize / halfLength : 1.0;
     const double stepJ = (halfWidth  > 0) ? cellSize / halfWidth  : 1.0;
@@ -244,10 +292,10 @@ bool checkElevateSlice(const Position3D& center,
                 (cy + fi * halfLength * vec1Y + fj * halfWidth * vec2Y) * y_extent[cm],
                 cz * z_extent[cm],
             };
-            if (map.get(sample) != 0) return true;
+            if (map.get(sample) != 0) return true; //hit a wall
         }
     }
-    return false;
+    return false; //no wall hit
 }
 
 bool canAdvance(const Position3D& start,
@@ -258,8 +306,8 @@ bool canAdvance(const Position3D& start,
                 double halfHeight,
                 const IMap3D& map,
                 int mapResolution) {
-    const double fx = std::cos(headingRad);
-    const double fy = std::sin(headingRad);
+    const double fx = snapCardinal(std::cos(headingRad));
+    const double fy = snapCardinal(std::sin(headingRad));
 
     const double step_factor = 0.5;
     const double step = step_factor * std::pow(10.0, -mapResolution);

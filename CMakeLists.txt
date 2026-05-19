@@ -19,6 +19,7 @@ add_executable(drone_mapper
     src/ExplorationAlgorithm.cpp
     src/Drone.cpp
     src/Simulator.cpp
+    src/Profiler.cpp
 )
 
 target_link_libraries(drone_mapper PRIVATE

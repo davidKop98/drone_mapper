@@ -122,37 +122,29 @@ void Drone::processScan(const ScanResults& results,const Orientation& relScanOri
             if (distCm > 0.0) {
                 const Position3D hitPos = DroneMath::beamToWorldPoint(pos, hdg, *matched);
 
-                // Un-nudged snap: may land on the interior cell when the beam
-                // hits exactly on a cell boundary face (floor() goes left/down).
-                const CellKey origKey = DroneMath::snapToGrid(hitPos, xyR, zR);
-
-                // Nudge forward along the beam so floor() snaps into the wall
-                // cell rather than the interior cell at exact boundary hits.
-                // Use a TINY nudge (~1e-6 cell): just enough to escape an
-                // exact integer boundary, small enough to never cross a
-                // non-boundary hit into a neighbouring cell.
-                constexpr double kPI = 3.14159265;
-                const double bh = beam.horizontal.force_numerical_value_in(deg) * kPI / 180.0;
-                const double ba = beam.altitude.force_numerical_value_in(deg)   * kPI / 180.0;
-                const double nudge = 1e-6 * std::pow(10.0, -static_cast<double>(std::max(xyR, zR)));
-                const Position3D nudgedHit{
-                    (hitPos.x.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::cos(bh)) * x_extent[cm],
-                    (hitPos.y.force_numerical_value_in(cm) + nudge * std::cos(ba) * std::sin(bh)) * y_extent[cm],
-                    (hitPos.z.force_numerical_value_in(cm) + nudge * std::sin(ba))                 * z_extent[cm],
+                // Snap the hit point in DOUBLE precision, identical to the
+                // lidar's InputMap::worldToGrid. Because beamToWorldPoint now
+                // uses the same mp-units math as MockLidarSensor::traceBeam,
+                // hitPos equals the lidar's first wall-sample bit-for-bit, so
+                // snapDouble lands in the exact cell the lidar saw. No nudge
+                // and no OOB fallback are needed — the lidar's first wall
+                // sample is always strictly INSIDE the wall cell, so floor()
+                // can never miss it.
+                const int xyR_ = xyR;
+                const int zR_  = zR;
+                auto snapDouble = [](double v, int res) {
+                    const double f = std::pow(10.0, static_cast<double>(res));
+                    return static_cast<float>(std::floor(v * f) / f);
                 };
-                // If the nudge pushed hitKey out of bounds (e.g. altitude=-90°
-                // hitting exactly z=0), fall back to origKey which is already
-                // the correct wall cell.
-                const CellKey nudgedKey = DroneMath::snapToGrid(nudgedHit, xyR, zR);
-                const CellKey hitKey = (buildingMap_.getCell(nudgedKey) == CellValue::OutOfBounds)
-                                           ? origKey : nudgedKey;
+                const CellKey hitKey{
+                    snapDouble(hitPos.x.force_numerical_value_in(cm), xyR_),
+                    snapDouble(hitPos.y.force_numerical_value_in(cm), xyR_),
+                    snapDouble(hitPos.z.force_numerical_value_in(cm), zR_),
+                };
 
-                // Exclude both origKey and hitKey from Empty marking: rayMarch
-                // may walk its last step into origKey (when the beam terminates
-                // on an exact boundary), and hitKey is the confirmed wall cell.
                 const auto cells = DroneMath::rayMarch(pos, beam, matched->distance, xyR, zR);
                 for (const auto& k : cells) {
-                    if (k != hitKey && k != origKey) markEmpty(k);
+                    if (k != hitKey) markEmpty(k);
                 }
                 buildingMap_.setCell(hitKey, CellValue::Occupied);
             }

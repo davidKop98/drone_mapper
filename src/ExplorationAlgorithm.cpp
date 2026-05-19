@@ -7,7 +7,7 @@ namespace cpp_course {
 
 namespace {
 
-constexpr double PI      = 3.14159265;
+constexpr double PI      = 3.14159265358979323846;
 constexpr double EPS_CM  = 1e-4;
 constexpr double EPS_DEG = 1e-4;
 
