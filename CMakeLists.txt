@@ -29,3 +29,5 @@ target_link_libraries(drone_mapper PRIVATE
 )
 
 target_include_directories(drone_mapper PRIVATE include)
+
+target_compile_options(drone_mapper PRIVATE -Wall -Wextra -Werror -pedantic)

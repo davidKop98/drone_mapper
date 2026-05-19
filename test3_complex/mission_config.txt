@@ -1,0 +1,12 @@
+start_x: 3
+start_y: 3
+start_z: 3
+start_heading: 0
+min_x: 0
+max_x: 16
+min_y: 0
+max_y: 12
+min_z: 0
+max_z: 11
+xy_resolution: 0
+z_resolution: 0

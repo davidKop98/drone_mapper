@@ -202,8 +202,7 @@ HorizontalAngle computeStepAngle(const LidarConfig& cfg) {
 // will be the smallest resolution in our output map.
 //if i want to make this max efficient, i'd need to calculate the biggest steping distance-
 //possible for the given FOV angle, and to ensure we jump the biggest distance, while never hitting a potential blind spot.
-PhysicalLength computeMoveStep(const DroneConfig&   droneConfig,
-                                const MissionConfig& missionConfig) {
+PhysicalLength computeMoveStep(const MissionConfig& missionConfig) {
     double xy_cell = std::pow(10.0, -static_cast<double>(missionConfig.xyResolution));
     double z_cell  = std::pow(10.0, -static_cast<double>(missionConfig.zResolution));
     double step    = std::min(xy_cell, z_cell);

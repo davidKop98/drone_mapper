@@ -62,9 +62,7 @@ namespace cpp_course::DroneMath {
 
 // Compute movement step size aligned to output grid and passage constraints.
 // step = max(xy_cell_size, minPassWidth / 2), rounded up to nearest xy_cell_size.
-[[nodiscard]] PhysicalLength computeMoveStep(
-    const DroneConfig&   droneConfig,
-    const MissionConfig& missionConfig);
+[[nodiscard]] PhysicalLength computeMoveStep(const MissionConfig& missionConfig);
 
 // ---------------------------------------------------------------------------
 // Collision-checking helpers — used by MockMovementDriver and the exploration

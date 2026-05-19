@@ -93,7 +93,7 @@ HorizontalAngle ExplorationAlgorithm::computeStepAngle() const {
 }
 
 PhysicalLength ExplorationAlgorithm::computeMoveStep() const {
-    return DroneMath::computeMoveStep(config_, mission_);
+    return DroneMath::computeMoveStep(mission_);
 }
 
 double ExplorationAlgorithm::halfWidth() const {

@@ -1,0 +1,10 @@
+min_pass_width:   2
+min_pass_length:  2
+min_pass_height:  3
+max_rotate:       45
+max_advance:      100
+max_elevate:      100
+lidar_beam_min:   0.5
+lidar_beam_max:   30
+lidar_spacing:    1
+lidar_fov_circles: 2
