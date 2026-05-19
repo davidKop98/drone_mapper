@@ -1,11 +1,9 @@
 #include <cpp_course/DroneMath.h>
-#include <cpp_course/Profiler.h>
 
 #include <mp-units/systems/si/math.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <unordered_set>
 #include <vector>
 
@@ -106,8 +104,6 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
                                PhysicalLength     maxDist,
                                int xyResolution,
                                int zResolution) {
-    ++profiler::rayMarch_calls;
-    profiler::ScopedTimer _t(profiler::rayMarch_total_ns);
     //smaller factor = smaller steps while "collecting" all cells in the direction of the beam, up to max distance
     double factor = 0.3;
     const int maxRes = std::max(xyResolution, zResolution);
@@ -135,10 +131,8 @@ std::vector<CellKey> rayMarch(const Position3D&  origin,
             (oz + dz * dist) * z_extent[cm],
         };
         const CellKey key = snapToGrid(p, xyResolution, zResolution);
-        if (seen.insert(key).second) {
+        if (seen.insert(key).second)
             result.push_back(key);
-            ++profiler::rayMarch_cells_pushed;
-        }
     }
     return result;
 }
@@ -232,9 +226,9 @@ bool checkAdvanceSlice(const Position3D& center,
     // that FP residue shoves perpendicular samples one cell sideways.
     const double vec2X = snapCardinal(-std::sin(headingRad));
     const double vec2Y = snapCardinal( std::cos(headingRad));
-
-    const double stepI = (halfHeight > 0) ? cellSize / halfHeight : 1.0;
-    const double stepJ = (halfWidth  > 0) ? cellSize / halfWidth  : 1.0;
+    double factor = 0.5;
+    const double stepI = factor*((halfHeight > 0) ? cellSize / halfHeight : 1.0);
+    const double stepJ = factor*((halfWidth  > 0) ? cellSize / halfWidth  : 1.0);
 
     const double cx = center.x.force_numerical_value_in(cm);
     const double cy = center.y.force_numerical_value_in(cm);
@@ -249,15 +243,7 @@ bool checkAdvanceSlice(const Position3D& center,
                 (cy + fj * halfWidth  * vec2Y) * y_extent[cm],
                 (cz + fi * halfHeight)         * z_extent[cm],
             };
-            if (map.get(sample) != 0) {
-                std::printf("[HIT-A] center=(%.17g,%.17g,%.17g) hRad=%.17g fi=%.5g fj=%.5g sample=(%.17g,%.17g,%.17g) vec2=(%.17g,%.17g)\n",
-                            cx, cy, cz, headingRad, fi, fj,
-                            sample.x.force_numerical_value_in(cm),
-                            sample.y.force_numerical_value_in(cm),
-                            sample.z.force_numerical_value_in(cm),
-                            vec2X, vec2Y);
-                return true; //hit a wall
-            }
+            if (map.get(sample) != 0) return true; //hit a wall
         }
     }
     return false; //no wall hit

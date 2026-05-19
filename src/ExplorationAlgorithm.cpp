@@ -64,6 +64,13 @@ Command makeLevelMarker() {
 } // namespace
 
 // 10 fixed candidate directions, clockwise convention (+Y = south).
+// Diagonals use unit vectors (0.707...). At resolution=0 with step=1cm,
+// diagonal targets snap back to the current cell (rejected as visited),
+// so the algorithm is effectively axis-aligned only. Enabling true
+// diagonal moves needs canAdvance to handle a rotated body (its world-
+// axis projection grows by √2 at 45°, exceeding `halfWidth`) and
+// per-caller FP-precision parity between findNextTarget's reqH and
+// MockMovementDriver's toRad(heading). Left as future work.
 const std::array<std::array<double, 3>, 10>
 ExplorationAlgorithm::kDirections = {{
     { 1.0,           0.0,           0.0},  //   0°  east
@@ -207,6 +214,20 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
     const double pz = pos.z.force_numerical_value_in(cm);
 
     for (const auto& dir : kDirections) { //find first valid(=reachable) target in priority order
+        // Skip diagonal directions entirely. Unit-vector diagonals (0.707) at
+        // step=1cm produce target positions that floor to the current cell for
+        // +x/+y diagonals (visited → skipped) but to an ADJACENT cell for
+        // -x/-y diagonals (taken!). Taking the asymmetric subset puts the
+        // drone at sub-cell positions, and subsequent cardinal moves sweep a
+        // rotated body footprint that canAdvance's perpendicular-only
+        // sampling doesn't fully cover → collisions. Until canAdvance handles
+        // rotated-body geometry (see comment on kDirections), keep moves
+        // strictly axis-aligned.
+        const bool isDiagonal =
+            (std::abs(dir[0]) > 0.1 && std::abs(dir[0]) < 0.9) ||
+            (std::abs(dir[1]) > 0.1 && std::abs(dir[1]) < 0.9);
+        if (isDiagonal) continue;
+
         const double tx = px + step * dir[0];
         const double ty = py + step * dir[1];
         const double tz = pz + step * dir[2];
@@ -224,12 +245,12 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
         if (dir[2] != 0.0) { //  up/down elevate
             const double h = toRad(heading.force_numerical_value_in(deg));
             if (!DroneMath::canElevate(pos, dir[2] * step, h,
-                                       hW, hL, hH, buildingMap_, zRes))
+                                       hW, hL, hH, buildingMap_, zRes)) 
                 continue;
         } else { // horizontal advance
             const double reqH = std::atan2(dir[1], dir[0]);
             if (!DroneMath::canAdvance(pos, step, reqH,
-                                       hW, hL, hH, buildingMap_, xyRes))
+                                       hW, hL, hH, buildingMap_, xyRes))//formyself: might need to change xyRes to min(Zres,XY res)
                 continue;
         }
 

@@ -1,6 +1,5 @@
 #include <cpp_course/Drone.h>
 #include <cpp_course/DroneMath.h>
-#include <cpp_course/Profiler.h>
 
 #include <cmath>
 
@@ -39,8 +38,6 @@ Drone::Drone(const ILidarSensor&    lidar,
     , mission_(mission) {}
 
 Command Drone::getNextCommand() {
-    ++profiler::decide_calls;
-    profiler::ScopedTimer _t(profiler::decide_total_ns);
     const Position3D     pos = posSensor_.position();
     const HorizontalAngle hdg = posSensor_.heading().horizontal;
     return algorithm_.decide(pos, hdg);
@@ -84,8 +81,6 @@ void Drone::markEmpty(const CellKey& key) {
 //for each beam in results (=hits): update the map for those beams up to beam distance. (ignore 0 dist beams)
 //for each beam in [allBeams\results] : update map up until max beam length. (dont overwrite walls->shouldnt happen anyway)
 void Drone::processScan(const ScanResults& results,const Orientation& relScanOrientation) {
-    ++profiler::processScan_calls;
-    profiler::ScopedTimer _t(profiler::processScan_total_ns);
     const Position3D     pos    = posSensor_.position();
     const HorizontalAngle hdg   = posSensor_.heading().horizontal;
     const double         hdgDeg = hdg.force_numerical_value_in(deg);

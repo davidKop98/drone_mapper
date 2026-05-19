@@ -64,17 +64,7 @@ void Simulator::run() {
             break;
         }
         ++commandCount_;
-        if (!drone_->execute(cmd)) {
-            const auto& p = state_.position;
-            std::cout << "SIMULATION FAILED - collision detected at pos=("
-                      << p.x.force_numerical_value_in(cm) << ","
-                      << p.y.force_numerical_value_in(cm) << ","
-                      << p.z.force_numerical_value_in(cm) << ")"
-                      << " cmd=" << (cmd.type == CommandType::Advance ? "Advance" : "Elevate")
-                      << " dist=" << cmd.distanceValue.force_numerical_value_in(cm)
-                      << " heading=" << state_.heading.force_numerical_value_in(deg) << "deg\n";
-            break;
-        }
+        if (!drone_->execute(cmd)) break;
     }
 }
 

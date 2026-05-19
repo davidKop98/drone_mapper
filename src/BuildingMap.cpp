@@ -1,6 +1,5 @@
 #include <cpp_course/BuildingMap.h>
 #include <cpp_course/DroneMath.h>
-#include <cpp_course/Profiler.h>
 
 namespace cpp_course {
 
@@ -19,14 +18,12 @@ bool BuildingMap::isOutOfBounds(const CellKey& key) const {
 
 //returns enum value of the request key in the map
 CellValue BuildingMap::getCell(const CellKey& key) const {
-    ++profiler::getCell_calls;
     if (isOutOfBounds(key)) return CellValue::OutOfBounds;
     const auto it = cells_.find(key);
     return (it == cells_.end()) ? CellValue::Unmapped : it->second;
 }
 
 void BuildingMap::setCell(const CellKey& key, CellValue value) {
-    ++profiler::setCell_calls;
     if (isOutOfBounds(key)) return;
     cells_[key] = value;
 }

@@ -24,8 +24,19 @@ namespace cpp_course::DroneMath {
     int xyResolution,
     int zResolution);
 
+// Snap a sin/cos result to {-1, 0, 1} when it's within FP tolerance.
+// std::sin(π) returns ~1.22e-16 instead of 0; std::cos(3π/2) similar.
+// Use this on heading-derived fx/fy/vec2X/vec2Y to keep cardinal headings
+// numerically clean — otherwise position and perpendicular samples drift
+// by ULPs across moves, eventually landing one cell over.
+[[nodiscard]] double snapCardinal(double v);
+
 // Snap a single float value to n decimal places, floor-toward-zero.
 // Example: snapValue(2.891, 1) → 2.8  |  snapValue(-1.35, 1) → -1.3
+// Float-cast is intentional: it absorbs ~1e-7 of FP drift from movement
+// math (cos/sin(π) etc.), keeping the drone's stored position snapped
+// to the cell it logically occupies. Don't change this without also
+// fixing position-drift accumulation, or visited-tracking breaks.
 [[nodiscard]] float snapValue(float value, int decimalPlaces);
 
 // Walk a ray from origin and return all output-grid cells it passes through.
