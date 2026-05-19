@@ -104,9 +104,14 @@ bool InputMap::worldToGrid(const Position3D& pos,
     const double py = pos.y.force_numerical_value_in(cm);
     const double pz = pos.z.force_numerical_value_in(cm);
 
-    cx = static_cast<int>(std::floor((px - ox) / cellSize));
-    cy = static_cast<int>(std::floor((py - oy) / cellSize));
-    cz = static_cast<int>(std::floor((pz - oz) / cellSize));
+    // Float-cast before floor matches BuildingMap's snapValue. At exact cell
+    // boundaries (e.g., a body-corner sample whose world coord is 15.0 ± 1 ULP
+    // due to diagonal-move drift), float epsilon (~1e-7) snaps the value to its
+    // intended side so both maps agree which cell owns the position. Far above
+    // accumulated FP drift (~1e-13), far below cell size (≥ 1 cm).
+    cx = static_cast<int>(std::floor(static_cast<float>((px - ox) / cellSize)));
+    cy = static_cast<int>(std::floor(static_cast<float>((py - oy) / cellSize)));
+    cz = static_cast<int>(std::floor(static_cast<float>((pz - oz) / cellSize)));
 
     return cx >= 0 && cx < sizeX_ &&
            cy >= 0 && cy < sizeY_ &&

@@ -64,25 +64,24 @@ Command makeLevelMarker() {
 } // namespace
 
 // 10 fixed candidate directions, clockwise convention (+Y = south).
-// Diagonals use unit vectors (0.707...). At resolution=0 with step=1cm,
-// diagonal targets snap back to the current cell (rejected as visited),
-// so the algorithm is effectively axis-aligned only. Enabling true
-// diagonal moves needs canAdvance to handle a rotated body (its world-
-// axis projection grows by √2 at 45°, exceeding `halfWidth`) and
-// per-caller FP-precision parity between findNextTarget's reqH and
-// MockMovementDriver's toRad(heading). Left as future work.
+// Diagonals use (±1, ±1) rather than unit (±0.707, ±0.707) so that
+// `target = current + step * dir` lands cleanly on the adjacent diagonal
+// cell (e.g., from cell (3,3) SE-diagonal target is (4,4), not (3,3) which
+// the unit-vector form would snap to). The advance distance is recomputed
+// from `sqrt(dx² + dy²)` in decide(), so the drone advances step*√2 at the
+// 45° heading derived from `atan2(dir[1], dir[0])`.
 const std::array<std::array<double, 3>, 10>
 ExplorationAlgorithm::kDirections = {{
-    { 1.0,           0.0,           0.0},  //   0°  east
-    { 0.707106781,   0.707106781,   0.0},  //  45°  southeast
-    { 0.0,           1.0,           0.0},  //  90°  south (+Y)
-    {-0.707106781,   0.707106781,   0.0},  // 135°  southwest
-    {-1.0,           0.0,           0.0},  // 180°  west
-    {-0.707106781,  -0.707106781,   0.0},  // 225°  northwest
-    { 0.0,          -1.0,           0.0},  // 270°  north (-Y)
-    { 0.707106781,  -0.707106781,   0.0},  // 315°  northeast
-    { 0.0,           0.0,           1.0},  // up
-    { 0.0,           0.0,          -1.0},  // down
+    { 1.0,  0.0,  0.0},  //   0°  east
+    { 1.0,  1.0,  0.0},  //  45°  southeast
+    { 0.0,  1.0,  0.0},  //  90°  south (+Y)
+    {-1.0,  1.0,  0.0},  // 135°  southwest
+    {-1.0,  0.0,  0.0},  // 180°  west
+    {-1.0, -1.0,  0.0},  // 225°  northwest
+    { 0.0, -1.0,  0.0},  // 270°  north (-Y)
+    { 1.0, -1.0,  0.0},  // 315°  northeast
+    { 0.0,  0.0,  1.0},  // up
+    { 0.0,  0.0, -1.0},  // down
 }};
 
 ExplorationAlgorithm::ExplorationAlgorithm(
@@ -214,20 +213,6 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
     const double pz = pos.z.force_numerical_value_in(cm);
 
     for (const auto& dir : kDirections) { //find first valid(=reachable) target in priority order
-        // Skip diagonal directions entirely. Unit-vector diagonals (0.707) at
-        // step=1cm produce target positions that floor to the current cell for
-        // +x/+y diagonals (visited → skipped) but to an ADJACENT cell for
-        // -x/-y diagonals (taken!). Taking the asymmetric subset puts the
-        // drone at sub-cell positions, and subsequent cardinal moves sweep a
-        // rotated body footprint that canAdvance's perpendicular-only
-        // sampling doesn't fully cover → collisions. Until canAdvance handles
-        // rotated-body geometry (see comment on kDirections), keep moves
-        // strictly axis-aligned.
-        const bool isDiagonal =
-            (std::abs(dir[0]) > 0.1 && std::abs(dir[0]) < 0.9) ||
-            (std::abs(dir[1]) > 0.1 && std::abs(dir[1]) < 0.9);
-        if (isDiagonal) continue;
-
         const double tx = px + step * dir[0];
         const double ty = py + step * dir[1];
         const double tz = pz + step * dir[2];
@@ -248,9 +233,19 @@ bool ExplorationAlgorithm::findNextTarget(const Position3D& pos,
                                        hW, hL, hH, buildingMap_, zRes)) 
                 continue;
         } else { // horizontal advance
-            const double reqH = std::atan2(dir[1], dir[0]);
-            if (!DroneMath::canAdvance(pos, step, reqH,
-                                       hW, hL, hH, buildingMap_, xyRes))//formyself: might need to change xyRes to min(Zres,XY res)
+            // FP parity with driver: driver computes h = toRad(state_.heading_deg)
+            // after rotating to requiredDeg = toDeg(atan2(dy, dx)). Routing the
+            // planner's reqH through the same toRad(toDeg(...)) round-trip makes
+            // planner.cos/sin bit-identical to driver.cos/sin — same swept body.
+            const double reqDeg = toDeg(std::atan2(dir[1], dir[0]));
+            const double reqH   = toRad(reqDeg);
+            // For non-unit kDirections (diagonals are (±1, ±1)) the actual
+            // advance distance is step * |dir_xy|, which matches what decide()
+            // emits as `horiz = sqrt(dx² + dy²)`. Sweeping only `step` would
+            // skip the trailing 0.414cm of a diagonal move's body sweep.
+            const double advanceDist = step * std::sqrt(dir[0]*dir[0] + dir[1]*dir[1]);
+            if (!DroneMath::canAdvance(pos, advanceDist, reqH,
+                                       hW, hL, hH, buildingMap_, xyRes))
                 continue;
         }
 

@@ -117,19 +117,18 @@ void Drone::processScan(const ScanResults& results,const Orientation& relScanOri
             if (distCm > 0.0) {
                 const Position3D hitPos = DroneMath::beamToWorldPoint(pos, hdg, *matched);
 
-                // Snap the hit point in DOUBLE precision, identical to the
-                // lidar's InputMap::worldToGrid. Because beamToWorldPoint now
-                // uses the same mp-units math as MockLidarSensor::traceBeam,
-                // hitPos equals the lidar's first wall-sample bit-for-bit, so
-                // snapDouble lands in the exact cell the lidar saw. No nudge
-                // and no OOB fallback are needed — the lidar's first wall
-                // sample is always strictly INSIDE the wall cell, so floor()
-                // can never miss it.
+                // Snap the hit point with float-cast drift absorption,
+                // identical to InputMap::worldToGrid and BuildingMap::snapValue.
+                // Because beamToWorldPoint now uses the same mp-units math as
+                // MockLidarSensor::traceBeam, hitPos equals the lidar's first
+                // wall-sample bit-for-bit, so this snap lands in the exact
+                // cell the lidar saw — and now also matches what BuildingMap
+                // uses to bucket the same position.
                 const int xyR_ = xyR;
                 const int zR_  = zR;
                 auto snapDouble = [](double v, int res) {
                     const double f = std::pow(10.0, static_cast<double>(res));
-                    return static_cast<float>(std::floor(v * f) / f);
+                    return std::floor(static_cast<float>(v * f)) / static_cast<float>(f);
                 };
                 const CellKey hitKey{
                     snapDouble(hitPos.x.force_numerical_value_in(cm), xyR_),
